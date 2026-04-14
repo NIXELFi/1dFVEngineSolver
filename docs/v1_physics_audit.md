@@ -359,6 +359,19 @@ shortfall at 11 k RPM in the SDM25 dyno calibration — although caution is
 warranted because the BC claim and actual fluid transport do not match
 1:1 in a Riemann-variable scheme.
 
+**Corollary: BC-reported ṁ is not the mass actually transported.** The
+5.4e−5 kg actual drift vs. 7.8e−3 kg BC-claimed flux mismatch is not "mass
+is leaking out of the universe." It is "the BCs and the interior solver
+disagree about how much mass moved, and the interior wins because it is
+the thing actually updating state." Any V1 downstream code that trusts
+BC-reported ṁ for an accounting-style calculation — volumetric efficiency,
+AFR, cumulative trapped-charge mass — is reading numbers that differ from
+the gas the interior is actually moving, often by O(throughput). This is
+the textbook non-conservative-MOC failure mode. V2 eliminates it by
+construction: in a finite-volume scheme the interface HLLC flux IS the
+boundary flux and IS what updates the adjacent cells, so there is only
+one number.
+
 ### Caveat on attribution
 
 MOC boundary conditions do not physically transport mass during the BC
