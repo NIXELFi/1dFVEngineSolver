@@ -11,3 +11,10 @@ venv/
 /__numba_cache__/
 **/*.nbi
 **/*.nbc
+
+# Acoustic test pipe-state dumps — regenerable from the test suite
+# (see tests/acoustic/_helpers.py:save_pipe_dump). Keep one canonical
+# dump checked in (a1_linear_1p02bar_dump.npz) for the waterfall
+# viewer demo; the rest are local-only and not worth carrying in git.
+docs/acoustic_diagnosis/*_dump.npz
+!docs/acoustic_diagnosis/a1_linear_1p02bar_dump.npz

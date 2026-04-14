@@ -80,6 +80,7 @@ from tests.acoustic._helpers import (
     make_always_open_valve,
     reflection_from_windowed,
     run_acoustic,
+    save_pipe_dump,
     save_timeseries_png,
     save_waterfall_png,
     set_uniform_atmosphere,
@@ -242,6 +243,14 @@ def run_a1(
             f"for {T_PULSE_S*1e3:.1f} ms."
         ),
         vmax_kPa=vmax_kPa,
+    )
+
+    # Persist the full primitive history as a pipe-state dump for the
+    # standalone waterfall viewer (diagnostics/waterfall_viewer.py).
+    save_pipe_dump(
+        run, "primary",
+        DIAG_DIR / f"a1_{label}_dump.npz",
+        source=f"tests/acoustic/test_a1_exhaust_primary.py:run_a1({label})",
     )
 
     return run, R

@@ -155,6 +155,10 @@ class AcousticRun:
     probes: Dict[str, Dict[str, ProbeRecord]]  # pipe name → probe label → record
     dt_history: List[float]
     n_steps: int
+    # Full primitive history for each pipe — populated alongside waterfalls.
+    # Each value dict has keys 'p', 'u', 'T', 'rho', 'Y' each → (n_rows, n_cells).
+    # Used by diagnostics/waterfall_viewer.py via save_pipe_dump.
+    state_history: Dict[str, Dict[str, np.ndarray]] = field(default_factory=dict)
 
 
 def run_acoustic(
@@ -199,8 +203,30 @@ def run_acoustic(
     # Waterfall buffers — preallocate an over-sized list per pipe then truncate.
     n_cells = {name: pipe.n_cells for name, pipe in pipes.items()}
     wf_rows: Dict[str, List[np.ndarray]] = {name: [] for name in pipes}
+    # Full-state buffers (per-step primitive snapshots) — used by save_pipe_dump
+    # for the standalone waterfall viewer (diagnostics/waterfall_viewer.py).
+    state_rows: Dict[str, Dict[str, List[np.ndarray]]] = {
+        name: {"p": [], "u": [], "T": [], "rho": [], "Y": []} for name in pipes
+    }
     t_rows: List[float] = []
     dt_history: List[float] = []
+
+    def _snapshot_state(name: str, pipe: PipeState) -> None:
+        s = pipe.real_slice()
+        A = pipe.area[s]
+        rho = pipe.q[s, I_RHO_A] / A
+        mom = pipe.q[s, I_MOM_A] / A
+        E = pipe.q[s, I_E_A] / A
+        u = mom / rho
+        gm1 = pipe.gamma - 1.0
+        p = gm1 * (E - 0.5 * rho * u * u)
+        T = p / (rho * R_AIR)
+        Y = pipe.q[s, I_Y_A] / (rho * A)
+        state_rows[name]["p"].append(p.copy())
+        state_rows[name]["u"].append(u.copy())
+        state_rows[name]["T"].append(T.copy())
+        state_rows[name]["rho"].append(rho.copy())
+        state_rows[name]["Y"].append(Y.copy())
 
     t = 0.0
     n_steps = 0
@@ -209,6 +235,7 @@ def run_acoustic(
     t_rows.append(t)
     for name, pipe in pipes.items():
         wf_rows[name].append(pipe_pressure(pipe).copy())
+        _snapshot_state(name, pipe)
     for name, recs in probes.items():
         pipe = pipes[name]
         for label, rec in recs.items():
@@ -266,6 +293,7 @@ def run_acoustic(
         t_rows.append(t)
         for name, pipe in pipes.items():
             wf_rows[name].append(pipe_pressure(pipe).copy())
+            _snapshot_state(name, pipe)
 
     # Decimate waterfall rows to at most `waterfall_rows`
     n_total_rows = len(t_rows)
@@ -278,6 +306,13 @@ def run_acoustic(
         name: np.vstack([wf_rows[name][i] for i in idxs])
         for name in pipes
     }
+    state_history = {
+        name: {
+            field_key: np.vstack([state_rows[name][field_key][i] for i in idxs])
+            for field_key in ("p", "u", "T", "rho", "Y")
+        }
+        for name in pipes
+    }
 
     return AcousticRun(
         pipes=pipes,
@@ -287,7 +322,55 @@ def run_acoustic(
         probes=probes,
         dt_history=dt_history,
         n_steps=n_steps,
+        state_history=state_history,
     )
+
+
+# -----------------------------------------------------------------------------
+# Pipe-state dump format (consumed by diagnostics/waterfall_viewer.py)
+# -----------------------------------------------------------------------------
+
+def save_pipe_dump(
+    run: "AcousticRun", pipe_name: str, out_path: Path,
+    *, source: str = "",
+) -> Path:
+    """Persist a pipe's full primitive-state history to an .npz file.
+
+    Format:
+      time     — (n_rows,) timestamps [s]
+      x        — (n_cols,) cell-centre positions [m]
+      pressure — (n_rows, n_cols) [Pa]
+      velocity — (n_rows, n_cols) [m/s]
+      temperature — (n_rows, n_cols) [K]
+      density  — (n_rows, n_cols) [kg/m³]
+      Y        — (n_rows, n_cols) burned-mass fraction
+      pipe_name (string scalar)
+      source   (string scalar; free-form provenance)
+      gamma    (float scalar)
+      length   (float scalar) [m]
+
+    Consumed by ``diagnostics.waterfall_viewer.render_waterfall``.
+    """
+    pipe = run.pipes[pipe_name]
+    sh = run.state_history[pipe_name]
+    x = np.array([(i + 0.5) * pipe.dx for i in range(pipe.n_cells)])
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        out_path,
+        time=run.time,
+        x=x,
+        pressure=sh["p"],
+        velocity=sh["u"],
+        temperature=sh["T"],
+        density=sh["rho"],
+        Y=sh["Y"],
+        pipe_name=str(pipe_name),
+        source=str(source),
+        gamma=float(pipe.gamma),
+        length=float(pipe.dx * pipe.n_cells),
+    )
+    return out_path
 
 
 # -----------------------------------------------------------------------------
