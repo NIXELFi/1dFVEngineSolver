@@ -10,27 +10,27 @@ Sound speed      : 347.2 m/s
 
 --- nominal (3 bar) ---
   p_cyl peak            = 3.000 bar
-  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.458 ms  amp=  +84163.3 Pa  impulse=+3.6543e+01 Pa·s
-  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.402 ms  amp= +100209.3 Pa  impulse=+3.3831e+01 Pa·s
-  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.219 ms  amp=  +28964.2 Pa  impulse=+5.3490e+00 Pa·s
-  A1_peak  = +84163.3 Pa    A1_imp  = +3.6543e+01 Pa·s
-  A2_peak  = +100209.3 Pa    A2_imp  = +3.3831e+01 Pa·s
-  A3_peak  = +28964.2 Pa    A3_imp  = +5.3490e+00 Pa·s
-  R_wall_peak  = A2_peak/A1_peak  = +1.1907
-  R_wall       = A2_imp /A1_imp   = +0.9258  <-- primary
+  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.710 ms  amp=  +84548.7 Pa  impulse=+3.6763e+01 Pa·s
+  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.403 ms  amp= +100526.7 Pa  impulse=+3.3965e+01 Pa·s
+  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.219 ms  amp=  +29050.6 Pa  impulse=+5.3498e+00 Pa·s
+  A1_peak  = +84548.7 Pa    A1_imp  = +3.6763e+01 Pa·s
+  A2_peak  = +100526.7 Pa    A2_imp  = +3.3965e+01 Pa·s
+  A3_peak  = +29050.6 Pa    A3_imp  = +5.3498e+00 Pa·s
+  R_wall_peak  = A2_peak/A1_peak  = +1.1890
+  R_wall       = A2_imp /A1_imp   = +0.9239  <-- primary
   R_valve_peak = A3_peak/A2_peak  = +0.2890
-  R_valve      = A3_imp /A2_imp   = +0.1581  <-- primary
+  R_valve      = A3_imp /A2_imp   = +0.1575  <-- primary
 
 --- linear (+2 kPa) ---
   p_cyl peak            = 1.020 bar
-  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.528 ms  amp=    +693.9 Pa  impulse=+3.3919e-01 Pa·s
-  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.424 ms  amp=    +851.0 Pa  impulse=+4.1456e-01 Pa·s
-  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.351 ms  amp=     -99.8 Pa  impulse=-4.2734e-02 Pa·s
-  A1_peak  = +693.9 Pa    A1_imp  = +3.3919e-01 Pa·s
-  A2_peak  = +851.0 Pa    A2_imp  = +4.1456e-01 Pa·s
-  A3_peak  = -99.8 Pa    A3_imp  = -4.2734e-02 Pa·s
-  R_wall_peak  = A2_peak/A1_peak  = +1.2265
-  R_wall       = A2_imp /A1_imp   = +1.2222  <-- primary
-  R_valve_peak = A3_peak/A2_peak  = -0.1173
-  R_valve      = A3_imp /A2_imp   = -0.1031  <-- primary
+  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.889 ms  amp=    +778.6 Pa  impulse=+3.8198e-01 Pa·s
+  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.566 ms  amp=    +778.0 Pa  impulse=+3.7746e-01 Pa·s
+  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.293 ms  amp=    -745.8 Pa  impulse=-3.1154e-01 Pa·s
+  A1_peak  = +778.6 Pa    A1_imp  = +3.8198e-01 Pa·s
+  A2_peak  = +778.0 Pa    A2_imp  = +3.7746e-01 Pa·s
+  A3_peak  = -745.8 Pa    A3_imp  = -3.1154e-01 Pa·s
+  R_wall_peak  = A2_peak/A1_peak  = +0.9991
+  R_wall       = A2_imp /A1_imp   = +0.9882  <-- primary
+  R_valve_peak = A3_peak/A2_peak  = -0.9586
+  R_valve      = A3_imp /A2_imp   = -0.8254  <-- primary
 

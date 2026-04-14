@@ -33,7 +33,7 @@ from solver.sources import apply_sources
 
 from bcs.restrictor import fill_choked_restrictor_left
 from bcs.junction_cv import JunctionCV, JunctionCVLeg, LEFT, RIGHT
-from bcs.valve import fill_valve_ghost
+from bcs.valve import fill_valve_ghost_characteristic as fill_valve_ghost  # Phase C1 fix (2026-04-14)
 from bcs.simple import fill_transmissive_right
 
 from cylinder.combustion import WiebeParams

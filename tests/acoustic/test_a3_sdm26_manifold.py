@@ -65,7 +65,8 @@ import pytest
 
 from bcs.junction_cv import JunctionCV, JunctionCVLeg, LEFT, RIGHT
 from bcs.simple import fill_transmissive_right
-from bcs.valve import fill_valve_ghost
+# Phase C1 fix (2026-04-14): characteristic + orifice valve BC
+from bcs.valve import fill_valve_ghost_characteristic as fill_valve_ghost
 from cylinder.valve import (
     EXHAUST_CD_TABLE,
     EXHAUST_LD_TABLE,
