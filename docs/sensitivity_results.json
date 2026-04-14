@@ -1,0 +1,1184 @@
+{
+  "rpm": 10500.0,
+  "sweeps": [
+    {
+      "field": "primary_length",
+      "xlabel": "primary length",
+      "unit": "m",
+      "group": "exhaust_geom",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.911261706992056,
+          "ve_atm": 0.6273847903573815,
+          "EGT_valve_K": 1189.3786613779073,
+          "indicated_power_kW": 51.97869898492928,
+          "nonconservation_max": 3.903127820947816e-18,
+          "field": "primary_length",
+          "value": 0.2
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.979155717213187,
+          "ve_atm": 0.6301180130769977,
+          "EGT_valve_K": 1225.6038984854006,
+          "indicated_power_kW": 52.33476286705586,
+          "nonconservation_max": 4.445228907190568e-18,
+          "field": "primary_length",
+          "value": 0.25
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.031230441572163,
+          "ve_atm": 0.6319434726793248,
+          "EGT_valve_K": 1243.761622001562,
+          "indicated_power_kW": 52.60786396177004,
+          "nonconservation_max": 3.3068166260807885e-18,
+          "field": "primary_length",
+          "value": 0.30000000000000004
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.115697302667865,
+          "ve_atm": 0.6364494669734128,
+          "EGT_valve_K": 1255.7486491893176,
+          "indicated_power_kW": 53.050842633597256,
+          "nonconservation_max": 3.0899761915836876e-18,
+          "field": "primary_length",
+          "value": 0.35000000000000003
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.14643324641875,
+          "ve_atm": 0.6380706850899672,
+          "EGT_valve_K": 1286.380845560546,
+          "indicated_power_kW": 53.21203445916654,
+          "nonconservation_max": 4.336808689942018e-18,
+          "field": "primary_length",
+          "value": 0.4
+        },
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 10.156339880880212,
+          "ve_atm": 0.63725890386417,
+          "EGT_valve_K": 1298.115131864207,
+          "indicated_power_kW": 53.26398889098856,
+          "nonconservation_max": 3.198396408832238e-18,
+          "field": "primary_length",
+          "value": 0.45
+        }
+      ],
+      "wall_time_s": 26.898734092712402
+    },
+    {
+      "field": "primary_diameter_in",
+      "xlabel": "primary ID",
+      "unit": "m",
+      "group": "exhaust_geom",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.941252156869774,
+          "ve_atm": 0.6278249968614881,
+          "EGT_valve_K": 1220.6980329894102,
+          "indicated_power_kW": 52.13598113655653,
+          "nonconservation_max": 4.2825985813177425e-18,
+          "field": "primary_diameter_in",
+          "value": 0.028
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.00588220710101,
+          "ve_atm": 0.6309017867125003,
+          "EGT_valve_K": 1235.0806526170072,
+          "indicated_power_kW": 52.47492748119603,
+          "nonconservation_max": 3.686287386450715e-18,
+          "field": "primary_diameter_in",
+          "value": 0.0304
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.076411836671333,
+          "ve_atm": 0.6340799991251252,
+          "EGT_valve_K": 1245.1360570066308,
+          "indicated_power_kW": 52.844813626202985,
+          "nonconservation_max": 3.415236843329339e-18,
+          "field": "primary_diameter_in",
+          "value": 0.0328
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.122186470093448,
+          "ve_atm": 0.6361962167974172,
+          "EGT_valve_K": 1259.66089356801,
+          "indicated_power_kW": 53.0848744743708,
+          "nonconservation_max": 3.686287386450715e-18,
+          "field": "primary_diameter_in",
+          "value": 0.0352
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.162412996914268,
+          "ve_atm": 0.6381794938652654,
+          "EGT_valve_K": 1275.0099988940149,
+          "indicated_power_kW": 53.29583878856639,
+          "nonconservation_max": 4.9873299934333204e-18,
+          "field": "primary_diameter_in",
+          "value": 0.0376
+        },
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 10.218619160667133,
+          "ve_atm": 0.6411339923208818,
+          "EGT_valve_K": 1286.4809398802956,
+          "indicated_power_kW": 53.59060683658864,
+          "nonconservation_max": 2.439454888092385e-18,
+          "field": "primary_diameter_in",
+          "value": 0.04
+        }
+      ],
+      "wall_time_s": 27.171322107315063
+    },
+    {
+      "field": "primary_diameter_out",
+      "xlabel": "primary OD (taper)",
+      "unit": "m",
+      "group": "exhaust_geom",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.984634483053785,
+          "ve_atm": 0.629906649723555,
+          "EGT_valve_K": 1240.7445950892998,
+          "indicated_power_kW": 52.36349574979634,
+          "nonconservation_max": 4.336808689942018e-18,
+          "field": "primary_diameter_out",
+          "value": 0.03
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.077790297773628,
+          "ve_atm": 0.6340244268724854,
+          "EGT_valve_K": 1241.8317962440458,
+          "indicated_power_kW": 52.85204283846848,
+          "nonconservation_max": 3.3610267347050637e-18,
+          "field": "primary_diameter_out",
+          "value": 0.032799999999999996
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.12819269063125,
+          "ve_atm": 0.6361720756391392,
+          "EGT_valve_K": 1246.8465065659643,
+          "indicated_power_kW": 53.11637354468101,
+          "nonconservation_max": 2.927345865710862e-18,
+          "field": "primary_diameter_out",
+          "value": 0.0356
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.163405593779098,
+          "ve_atm": 0.6376232969277599,
+          "EGT_valve_K": 1253.0064580945734,
+          "indicated_power_kW": 53.30104437138476,
+          "nonconservation_max": 3.2526065174565133e-18,
+          "field": "primary_diameter_out",
+          "value": 0.0384
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.190600068536941,
+          "ve_atm": 0.6386877469913856,
+          "EGT_valve_K": 1259.809316997132,
+          "indicated_power_kW": 53.44366328906443,
+          "nonconservation_max": 3.469446951953614e-18,
+          "field": "primary_diameter_out",
+          "value": 0.0412
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.211885198149089,
+          "ve_atm": 0.6396817440629587,
+          "EGT_valve_K": 1266.0180315485889,
+          "indicated_power_kW": 53.55529119050352,
+          "nonconservation_max": 3.903127820947816e-18,
+          "field": "primary_diameter_out",
+          "value": 0.044
+        }
+      ],
+      "wall_time_s": 27.1541748046875
+    },
+    {
+      "field": "collector_diameter_in",
+      "xlabel": "collector ID",
+      "unit": "m",
+      "group": "exhaust_geom",
+      "rows": [
+        {
+          "converged_cycle": 13,
+          "n_cycles_run": 14,
+          "imep_bar": 9.686575571185841,
+          "ve_atm": 0.6118624550332405,
+          "EGT_valve_K": 1342.1047300434795,
+          "indicated_power_kW": 50.80035324405161,
+          "nonconservation_max": 2.8189256484623115e-18,
+          "field": "collector_diameter_in",
+          "value": 0.04
+        },
+        {
+          "converged_cycle": 14,
+          "n_cycles_run": 15,
+          "imep_bar": 9.902608633999222,
+          "ve_atm": 0.6242443497027054,
+          "EGT_valve_K": 1285.59198127514,
+          "indicated_power_kW": 51.9333187407499,
+          "nonconservation_max": 3.3068166260807885e-18,
+          "field": "collector_diameter_in",
+          "value": 0.045
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.059718286565573,
+          "ve_atm": 0.6333552878064047,
+          "EGT_valve_K": 1240.5932696320444,
+          "indicated_power_kW": 52.757265840503315,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "collector_diameter_in",
+          "value": 0.05
+        },
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 10.148853721274948,
+          "ve_atm": 0.6387931456897932,
+          "EGT_valve_K": 1210.5789900206169,
+          "indicated_power_kW": 53.22472841657281,
+          "nonconservation_max": 2.222614453595284e-18,
+          "field": "collector_diameter_in",
+          "value": 0.055
+        },
+        {
+          "converged_cycle": 18,
+          "n_cycles_run": 19,
+          "imep_bar": 10.196363604176273,
+          "ve_atm": 0.6418875384469397,
+          "EGT_valve_K": 1192.4863115267717,
+          "indicated_power_kW": 53.47388962078105,
+          "nonconservation_max": 3.3610267347050637e-18,
+          "field": "collector_diameter_in",
+          "value": 0.06
+        },
+        {
+          "converged_cycle": 20,
+          "n_cycles_run": 21,
+          "imep_bar": 10.242160666774085,
+          "ve_atm": 0.6447291379554487,
+          "EGT_valve_K": 1175.5298968428838,
+          "indicated_power_kW": 53.714068096694604,
+          "nonconservation_max": 3.5236570605778894e-18,
+          "field": "collector_diameter_in",
+          "value": 0.065
+        }
+      ],
+      "wall_time_s": 27.952651023864746
+    },
+    {
+      "field": "runner_length",
+      "xlabel": "runner length",
+      "unit": "m",
+      "group": "intake_geom",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.047424245363835,
+          "ve_atm": 0.632381923328426,
+          "EGT_valve_K": 1239.6349277213114,
+          "indicated_power_kW": 52.692790873962714,
+          "nonconservation_max": 4.119968255444917e-18,
+          "field": "runner_length",
+          "value": 0.15
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.055938120985937,
+          "ve_atm": 0.6329851878706372,
+          "EGT_valve_K": 1239.9161702841589,
+          "indicated_power_kW": 52.73744111035433,
+          "nonconservation_max": 4.119968255444917e-18,
+          "field": "runner_length",
+          "value": 0.19
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.050882212224451,
+          "ve_atm": 0.6327043739127417,
+          "EGT_valve_K": 1240.245021172264,
+          "indicated_power_kW": 52.710925862611134,
+          "nonconservation_max": 3.198396408832238e-18,
+          "field": "runner_length",
+          "value": 0.22999999999999998
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.06925623559794,
+          "ve_atm": 0.6342745707525136,
+          "EGT_valve_K": 1244.782319711774,
+          "indicated_power_kW": 52.80728673555619,
+          "nonconservation_max": 3.63207727782644e-18,
+          "field": "runner_length",
+          "value": 0.26999999999999996
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.113227810621483,
+          "ve_atm": 0.6373424598168054,
+          "EGT_valve_K": 1245.495018031308,
+          "indicated_power_kW": 53.0378916100526,
+          "nonconservation_max": 2.927345865710862e-18,
+          "field": "runner_length",
+          "value": 0.30999999999999994
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.152686541016704,
+          "ve_atm": 0.6402130700149189,
+          "EGT_valve_K": 1245.9899062830932,
+          "indicated_power_kW": 53.244829286624466,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "runner_length",
+          "value": 0.35
+        }
+      ],
+      "wall_time_s": 27.045642137527466
+    },
+    {
+      "field": "runner_diameter_in",
+      "xlabel": "runner ID",
+      "unit": "m",
+      "group": "intake_geom",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.119798963521507,
+          "ve_atm": 0.5751562614482545,
+          "EGT_valve_K": 1240.2965353482334,
+          "indicated_power_kW": 47.827945537301154,
+          "nonconservation_max": 3.848917712323541e-18,
+          "field": "runner_diameter_in",
+          "value": 0.03
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.548634364091255,
+          "ve_atm": 0.6018874890762914,
+          "EGT_valve_K": 1240.3631513380017,
+          "indicated_power_kW": 50.07693329075453,
+          "nonconservation_max": 5.692061405548898e-18,
+          "field": "runner_diameter_in",
+          "value": 0.033
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.881256378272148,
+          "ve_atm": 0.6223487410265167,
+          "EGT_valve_K": 1240.4892710310396,
+          "indicated_power_kW": 51.821338802584826,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "runner_diameter_in",
+          "value": 0.036
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.118386993253347,
+          "ve_atm": 0.6370653946928941,
+          "EGT_valve_K": 1244.3189731833688,
+          "indicated_power_kW": 53.06494846809528,
+          "nonconservation_max": 3.469446951953614e-18,
+          "field": "runner_diameter_in",
+          "value": 0.039
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.320078499065675,
+          "ve_atm": 0.6494297936909568,
+          "EGT_valve_K": 1244.1498901424725,
+          "indicated_power_kW": 54.1227009902631,
+          "nonconservation_max": 3.686287386450715e-18,
+          "field": "runner_diameter_in",
+          "value": 0.041999999999999996
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.478697973362799,
+          "ve_atm": 0.6590473297284763,
+          "EGT_valve_K": 1243.9452009815748,
+          "indicated_power_kW": 54.954566210996944,
+          "nonconservation_max": 4.174178364069192e-18,
+          "field": "runner_diameter_in",
+          "value": 0.045
+        }
+      ],
+      "wall_time_s": 26.954753160476685
+    },
+    {
+      "field": "plenum_volume",
+      "xlabel": "plenum volume",
+      "unit": "m\u00b3",
+      "group": "intake_geom",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.922306736263327,
+          "ve_atm": 0.6246547722568795,
+          "EGT_valve_K": 1240.3159338113178,
+          "indicated_power_kW": 52.03662362346104,
+          "nonconservation_max": 3.2526065174565133e-18,
+          "field": "plenum_volume",
+          "value": 0.001
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.038713026666237,
+          "ve_atm": 0.6320352581755411,
+          "EGT_valve_K": 1240.2562251639538,
+          "indicated_power_kW": 52.64710568999114,
+          "nonconservation_max": 3.686287386450715e-18,
+          "field": "plenum_volume",
+          "value": 0.0014
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.087857166620433,
+          "ve_atm": 0.6354033026395961,
+          "EGT_valve_K": 1244.5994548994493,
+          "indicated_power_kW": 52.904837604763436,
+          "nonconservation_max": 3.74049749507499e-18,
+          "field": "plenum_volume",
+          "value": 0.0018
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.133353672736076,
+          "ve_atm": 0.6381561286670501,
+          "EGT_valve_K": 1244.412794909344,
+          "indicated_power_kW": 53.14343983989387,
+          "nonconservation_max": 5.095750210681871e-18,
+          "field": "plenum_volume",
+          "value": 0.0022
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.16563772484132,
+          "ve_atm": 0.6402674130025158,
+          "EGT_valve_K": 1244.5154518718043,
+          "indicated_power_kW": 53.312750577113974,
+          "nonconservation_max": 4.7704895589362195e-18,
+          "field": "plenum_volume",
+          "value": 0.0026
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.189759773370657,
+          "ve_atm": 0.6417429575206327,
+          "EGT_valve_K": 1244.489850204684,
+          "indicated_power_kW": 53.439256438473855,
+          "nonconservation_max": 4.228388472693467e-18,
+          "field": "plenum_volume",
+          "value": 0.003
+        }
+      ],
+      "wall_time_s": 26.786567211151123
+    },
+    {
+      "field": "restrictor_Cd",
+      "xlabel": "restrictor Cd",
+      "unit": "\u2014",
+      "group": "restrictor",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.940043143116256,
+          "ve_atm": 0.6261206464313465,
+          "EGT_valve_K": 1243.8771484223732,
+          "indicated_power_kW": 52.12964057530202,
+          "nonconservation_max": 2.5478751053409354e-18,
+          "field": "restrictor_Cd",
+          "value": 0.9
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.990256067848593,
+          "ve_atm": 0.6290525707771438,
+          "EGT_valve_K": 1239.7605366933722,
+          "indicated_power_kW": 52.39297763338554,
+          "nonconservation_max": 3.469446951953614e-18,
+          "field": "restrictor_Cd",
+          "value": 0.92
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.02164782583458,
+          "ve_atm": 0.6309283558489027,
+          "EGT_valve_K": 1240.2434755083023,
+          "indicated_power_kW": 52.55760881629641,
+          "nonconservation_max": 2.656295322589486e-18,
+          "field": "restrictor_Cd",
+          "value": 0.94
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.049301145290386,
+          "ve_atm": 0.6327386624419651,
+          "EGT_valve_K": 1240.3058729996224,
+          "indicated_power_kW": 52.70263410272522,
+          "nonconservation_max": 2.9815559743351372e-18,
+          "field": "restrictor_Cd",
+          "value": 0.96
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.076053675768714,
+          "ve_atm": 0.6343665885391231,
+          "EGT_valve_K": 1240.4617616095748,
+          "indicated_power_kW": 52.84293528434342,
+          "nonconservation_max": 2.9815559743351372e-18,
+          "field": "restrictor_Cd",
+          "value": 0.98
+        }
+      ],
+      "wall_time_s": 23.081599950790405
+    },
+    {
+      "field": "spark_advance",
+      "xlabel": "spark advance (BTDC)",
+      "unit": "\u00b0",
+      "group": "combustion",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.38520253210297,
+          "ve_atm": 0.6333780184101785,
+          "EGT_valve_K": 1251.8291899670448,
+          "indicated_power_kW": 49.21983010342957,
+          "nonconservation_max": 2.710505431213761e-18,
+          "field": "spark_advance",
+          "value": 15.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.714766889590218,
+          "ve_atm": 0.6332684842016412,
+          "EGT_valve_K": 1244.5908369839112,
+          "indicated_power_kW": 50.948200016405075,
+          "nonconservation_max": 3.0357660829594124e-18,
+          "field": "spark_advance",
+          "value": 19.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.966701762899998,
+          "ve_atm": 0.6333403223602584,
+          "EGT_valve_K": 1240.7468178037639,
+          "indicated_power_kW": 52.269449250933626,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "spark_advance",
+          "value": 23.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.127735291361013,
+          "ve_atm": 0.6333213059555215,
+          "EGT_valve_K": 1240.6596346491638,
+          "indicated_power_kW": 53.113974756344426,
+          "nonconservation_max": 5.637851296924623e-18,
+          "field": "spark_advance",
+          "value": 27.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.163327742049995,
+          "ve_atm": 0.6323912436425602,
+          "EGT_valve_K": 1248.3169183741645,
+          "indicated_power_kW": 53.30063608516328,
+          "nonconservation_max": 4.7704895589362195e-18,
+          "field": "spark_advance",
+          "value": 31.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.109937135537367,
+          "ve_atm": 0.63261947511859,
+          "EGT_valve_K": 1255.3550608845308,
+          "indicated_power_kW": 53.020633967714915,
+          "nonconservation_max": 2.3310346708438345e-18,
+          "field": "spark_advance",
+          "value": 35.0
+        }
+      ],
+      "wall_time_s": 27.465211868286133
+    },
+    {
+      "field": "combustion_duration",
+      "xlabel": "combustion duration",
+      "unit": "\u00b0",
+      "group": "combustion",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.447935973602913,
+          "ve_atm": 0.6328081294982363,
+          "EGT_valve_K": 1264.4180669699008,
+          "indicated_power_kW": 54.79323773708877,
+          "nonconservation_max": 2.7647155398380363e-18,
+          "field": "combustion_duration",
+          "value": 30.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.374918512710979,
+          "ve_atm": 0.6326213793849393,
+          "EGT_valve_K": 1255.1036778227908,
+          "indicated_power_kW": 54.41030438989764,
+          "nonconservation_max": 2.0057740190981832e-18,
+          "field": "combustion_duration",
+          "value": 38.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.176384807319025,
+          "ve_atm": 0.6324535496201706,
+          "EGT_valve_K": 1247.4598234404946,
+          "indicated_power_kW": 53.36911266113409,
+          "nonconservation_max": 3.903127820947816e-18,
+          "field": "combustion_duration",
+          "value": 46.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.904670570037537,
+          "ve_atm": 0.6332426911744349,
+          "EGT_valve_K": 1238.3429551396205,
+          "indicated_power_kW": 51.94413237435481,
+          "nonconservation_max": 3.415236843329339e-18,
+          "field": "combustion_duration",
+          "value": 54.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.5505009623855,
+          "ve_atm": 0.6331331943293261,
+          "EGT_valve_K": 1236.6616422617103,
+          "indicated_power_kW": 50.08672249355542,
+          "nonconservation_max": 5.204170427930421e-18,
+          "field": "combustion_duration",
+          "value": 62.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.155519914310654,
+          "ve_atm": 0.6331422171058065,
+          "EGT_valve_K": 1238.1540019749254,
+          "indicated_power_kW": 48.01528077305773,
+          "nonconservation_max": 4.119968255444917e-18,
+          "field": "combustion_duration",
+          "value": 70.0
+        }
+      ],
+      "wall_time_s": 27.067591905593872
+    },
+    {
+      "field": "eta_comb",
+      "xlabel": "\u03b7_comb",
+      "unit": "\u2014",
+      "group": "combustion",
+      "rows": [
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 9.01716422422578,
+          "ve_atm": 0.6320295669494221,
+          "EGT_valve_K": 1137.1607366442452,
+          "indicated_power_kW": 47.28968710190078,
+          "nonconservation_max": 2.4936649967166602e-18,
+          "field": "eta_comb",
+          "value": 0.85
+        },
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 9.292443805890631,
+          "ve_atm": 0.6328364281509654,
+          "EGT_valve_K": 1160.7689175864302,
+          "indicated_power_kW": 48.733365508854774,
+          "nonconservation_max": 2.656295322589486e-18,
+          "field": "eta_comb",
+          "value": 0.878
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.544808537366398,
+          "ve_atm": 0.6324261690983711,
+          "EGT_valve_K": 1189.6277632088174,
+          "indicated_power_kW": 50.05686909493579,
+          "nonconservation_max": 2.8189256484623115e-18,
+          "field": "eta_comb",
+          "value": 0.906
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.813596005514459,
+          "ve_atm": 0.6329362537987485,
+          "EGT_valve_K": 1215.2036151294465,
+          "indicated_power_kW": 51.466500210612324,
+          "nonconservation_max": 4.228388472693467e-18,
+          "field": "eta_comb",
+          "value": 0.9339999999999999
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.059650497848576,
+          "ve_atm": 0.6323880601095515,
+          "EGT_valve_K": 1246.5583861714663,
+          "indicated_power_kW": 52.75691032882181,
+          "nonconservation_max": 3.577867169202165e-18,
+          "field": "eta_comb",
+          "value": 0.962
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.322282497299467,
+          "ve_atm": 0.6328973384261829,
+          "EGT_valve_K": 1274.4630741935662,
+          "indicated_power_kW": 54.13425965596524,
+          "nonconservation_max": 3.2526065174565133e-18,
+          "field": "eta_comb",
+          "value": 0.99
+        }
+      ],
+      "wall_time_s": 27.30738615989685
+    },
+    {
+      "field": "wiebe_m",
+      "xlabel": "Wiebe m",
+      "unit": "\u2014",
+      "group": "combustion",
+      "rows": [
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.08807925530387,
+          "ve_atm": 0.6323289388101968,
+          "EGT_valve_K": 1243.7559593174938,
+          "indicated_power_kW": 52.90600232840464,
+          "nonconservation_max": 3.903127820947816e-18,
+          "field": "wiebe_m",
+          "value": 1.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.108694740844287,
+          "ve_atm": 0.6333013105847092,
+          "EGT_valve_K": 1238.6565879210145,
+          "indicated_power_kW": 53.01411834319796,
+          "nonconservation_max": 6.613633252161577e-18,
+          "field": "wiebe_m",
+          "value": 1.5
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.059718286565573,
+          "ve_atm": 0.6333552878064047,
+          "EGT_valve_K": 1240.5932696320444,
+          "indicated_power_kW": 52.757265840503315,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "wiebe_m",
+          "value": 2.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.967176085721883,
+          "ve_atm": 0.6323718980467007,
+          "EGT_valve_K": 1248.113843937756,
+          "indicated_power_kW": 52.27193679327782,
+          "nonconservation_max": 4.824699667560495e-18,
+          "field": "wiebe_m",
+          "value": 2.5
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.881675116232403,
+          "ve_atm": 0.6323935547412233,
+          "EGT_valve_K": 1252.4694261356842,
+          "indicated_power_kW": 51.82353483524274,
+          "nonconservation_max": 4.7704895589362195e-18,
+          "field": "wiebe_m",
+          "value": 3.0
+        }
+      ],
+      "wall_time_s": 22.334331274032593
+    },
+    {
+      "field": "intake_valve_max_lift",
+      "xlabel": "intake max lift",
+      "unit": "m",
+      "group": "valves",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.49001056148532,
+          "ve_atm": 0.5983726264113919,
+          "EGT_valve_K": 1240.603071109605,
+          "indicated_power_kW": 49.769486158483154,
+          "nonconservation_max": 3.5236570605778894e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.006
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.806429117994682,
+          "ve_atm": 0.6177696129935409,
+          "EGT_valve_K": 1244.5964032412908,
+          "indicated_power_kW": 51.428914129237185,
+          "nonconservation_max": 7.806255641895632e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.007
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.995155652823003,
+          "ve_atm": 0.6292559834521892,
+          "EGT_valve_K": 1240.1704005446359,
+          "indicated_power_kW": 52.41867305542815,
+          "nonconservation_max": 3.3068166260807885e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.008
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.101041417617914,
+          "ve_atm": 0.6359185860255723,
+          "EGT_valve_K": 1240.4694178790587,
+          "indicated_power_kW": 52.97398119457061,
+          "nonconservation_max": 3.903127820947816e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.009
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.17293452174099,
+          "ve_atm": 0.6406068081227009,
+          "EGT_valve_K": 1240.7657059080298,
+          "indicated_power_kW": 53.351017956264556,
+          "nonconservation_max": 2.656295322589486e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.009999999999999998
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.222786179187246,
+          "ve_atm": 0.6439669003718724,
+          "EGT_valve_K": 1241.0823280035056,
+          "indicated_power_kW": 53.6124603813466,
+          "nonconservation_max": 4.065758146820642e-18,
+          "field": "intake_valve_max_lift",
+          "value": 0.011
+        }
+      ],
+      "wall_time_s": 27.69316577911377
+    },
+    {
+      "field": "exhaust_valve_max_lift",
+      "xlabel": "exhaust max lift",
+      "unit": "m",
+      "group": "valves",
+      "rows": [
+        {
+          "converged_cycle": 17,
+          "n_cycles_run": 18,
+          "imep_bar": 9.047122720758876,
+          "ve_atm": 0.5777729375062025,
+          "EGT_valve_K": 1206.1184119290933,
+          "indicated_power_kW": 47.44680167715575,
+          "nonconservation_max": 5.149960319306146e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.005
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.635306022046695,
+          "ve_atm": 0.6083177957511811,
+          "EGT_valve_K": 1226.505050214464,
+          "indicated_power_kW": 50.531474816604096,
+          "nonconservation_max": 5.149960319306146e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.006
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 9.973842299971299,
+          "ve_atm": 0.6280804478225885,
+          "EGT_valve_K": 1236.456895952571,
+          "indicated_power_kW": 52.30689713980917,
+          "nonconservation_max": 2.8189256484623115e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.007
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.171138996062139,
+          "ve_atm": 0.6405074001108217,
+          "EGT_valve_K": 1252.9059322249107,
+          "indicated_power_kW": 53.34160148724782,
+          "nonconservation_max": 4.174178364069192e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.008
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.323366641534804,
+          "ve_atm": 0.6500988662127021,
+          "EGT_valve_K": 1266.222310024509,
+          "indicated_power_kW": 54.13994535053479,
+          "nonconservation_max": 6.071532165918825e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.009000000000000001
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.438568508238141,
+          "ve_atm": 0.6577363455249006,
+          "EGT_valve_K": 1277.78356310946,
+          "indicated_power_kW": 54.74411092792544,
+          "nonconservation_max": 3.63207727782644e-18,
+          "field": "exhaust_valve_max_lift",
+          "value": 0.01
+        }
+      ],
+      "wall_time_s": 27.346534252166748
+    },
+    {
+      "field": "T_wall_cylinder",
+      "xlabel": "cylinder T_wall",
+      "unit": "K",
+      "group": "thermal",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.118488935103708,
+          "ve_atm": 0.6387237609335932,
+          "EGT_valve_K": 1218.1356032958174,
+          "indicated_power_kW": 53.06548309273848,
+          "nonconservation_max": 4.228388472693467e-18,
+          "field": "T_wall_cylinder",
+          "value": 350.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.089076245534624,
+          "ve_atm": 0.6360070488125428,
+          "EGT_valve_K": 1229.3342156568497,
+          "indicated_power_kW": 52.911230951825885,
+          "nonconservation_max": 3.3068166260807885e-18,
+          "field": "T_wall_cylinder",
+          "value": 400.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.059718286565573,
+          "ve_atm": 0.6333552878064047,
+          "EGT_valve_K": 1240.5932696320444,
+          "indicated_power_kW": 52.757265840503315,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "T_wall_cylinder",
+          "value": 450.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.01184469090727,
+          "ve_atm": 0.6296737517331119,
+          "EGT_valve_K": 1255.708653728856,
+          "indicated_power_kW": 52.50619717824676,
+          "nonconservation_max": 2.439454888092385e-18,
+          "field": "T_wall_cylinder",
+          "value": 500.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.983265444700933,
+          "ve_atm": 0.6271135441764486,
+          "EGT_valve_K": 1267.0495799566847,
+          "indicated_power_kW": 52.35631595427227,
+          "nonconservation_max": 3.7947076036992655e-18,
+          "field": "T_wall_cylinder",
+          "value": 550.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 9.955340677569113,
+          "ve_atm": 0.6244755894273801,
+          "EGT_valve_K": 1278.5071782040786,
+          "indicated_power_kW": 52.2098670855127,
+          "nonconservation_max": 4.336808689942018e-18,
+          "field": "T_wall_cylinder",
+          "value": 600.0
+        }
+      ],
+      "wall_time_s": 27.172179222106934
+    },
+    {
+      "field": "primary_wall_T",
+      "xlabel": "exhaust primary T_wall",
+      "unit": "K",
+      "group": "thermal",
+      "rows": [
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.066499595068569,
+          "ve_atm": 0.6340142889767361,
+          "EGT_valve_K": 1238.4663532420914,
+          "indicated_power_kW": 52.79282978824496,
+          "nonconservation_max": 3.686287386450715e-18,
+          "field": "primary_wall_T",
+          "value": 700.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.064558955112771,
+          "ve_atm": 0.6337353257561167,
+          "EGT_valve_K": 1238.7185625206537,
+          "indicated_power_kW": 52.78265228077087,
+          "nonconservation_max": 2.3310346708438345e-18,
+          "field": "primary_wall_T",
+          "value": 800.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.063112056492212,
+          "ve_atm": 0.6335151876730548,
+          "EGT_valve_K": 1239.3396577021522,
+          "indicated_power_kW": 52.7750641542454,
+          "nonconservation_max": 3.7947076036992655e-18,
+          "field": "primary_wall_T",
+          "value": 900.0
+        },
+        {
+          "converged_cycle": 16,
+          "n_cycles_run": 17,
+          "imep_bar": 10.059718286565573,
+          "ve_atm": 0.6333552878064047,
+          "EGT_valve_K": 1240.5932696320444,
+          "indicated_power_kW": 52.757265840503315,
+          "nonconservation_max": 3.144186300207963e-18,
+          "field": "primary_wall_T",
+          "value": 1000.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.037904373029368,
+          "ve_atm": 0.6320499098517599,
+          "EGT_valve_K": 1245.2969801505803,
+          "indicated_power_kW": 52.642864780486725,
+          "nonconservation_max": 2.0599841277224584e-18,
+          "field": "primary_wall_T",
+          "value": 1100.0
+        },
+        {
+          "converged_cycle": 15,
+          "n_cycles_run": 16,
+          "imep_bar": 10.034989205599484,
+          "ve_atm": 0.6319198098022671,
+          "EGT_valve_K": 1246.513878503929,
+          "indicated_power_kW": 52.62757645344944,
+          "nonconservation_max": 5.637851296924623e-18,
+          "field": "primary_wall_T",
+          "value": 1200.0
+        }
+      ],
+      "wall_time_s": 27.303555965423584
+    }
+  ],
+  "total_wall_time_s": 426.73559498786926
+}
