@@ -8,3 +8,6 @@ venv/
 *.egg-info/
 .numba_cache/
 /tmp/
+/__numba_cache__/
+**/*.nbi
+**/*.nbc
