@@ -80,7 +80,15 @@ def _limit(a: float, b: float, limiter: int) -> float:
 
 @njit(cache=True, fastmath=False)
 def _compute_primitives(q: np.ndarray, area: np.ndarray, gamma: float, w_out: np.ndarray):
-    """Fill w_out[i, :] = (ρ, u, p, Y) from q[i, :] and area[i]."""
+    """Fill w_out[i, :] = (ρ, u, p, ρY) from q[i, :] and area[i].
+
+    NOTE: index 3 stores the CONSERVATIVE composition ρY, not the primitive
+    mass fraction Y. This keeps composition reconstruction consistent with
+    the conservative variable it advects (ρY), avoiding the well-known
+    de-sync between ρ and Y midpoints when Y is reconstructed as a
+    primitive. The HLLC wrapper below converts ρY → Y at each face by
+    dividing by the reconstructed ρ.
+    """
     n = q.shape[0]
     gm1 = gamma - 1.0
     for i in range(n):
@@ -91,11 +99,10 @@ def _compute_primitives(q: np.ndarray, area: np.ndarray, gamma: float, w_out: np
         rho_Y = q[i, 3] / A
         u = rho_u / rho
         p = gm1 * (E - 0.5 * rho_u * rho_u / rho)
-        Y = rho_Y / rho
         w_out[i, 0] = rho
         w_out[i, 1] = u
         w_out[i, 2] = p
-        w_out[i, 3] = Y
+        w_out[i, 3] = rho_Y
 
 
 @njit(cache=True, fastmath=False)
@@ -144,42 +151,50 @@ def muscl_hancock_step(
     _reconstruct_slopes(w, slopes, limiter)
 
     # Step 3: Hancock predictor.
-    # Primitive-form PDE (Toro 14.22 for 1D Euler):
-    #   ∂ρ/∂t + u·∂ρ/∂x + ρ·∂u/∂x = 0
-    #   ∂u/∂t + u·∂u/∂x + (1/ρ)·∂p/∂x = 0
-    #   ∂p/∂t + u·∂p/∂x + γp·∂u/∂x = 0
-    #   ∂Y/∂t + u·∂Y/∂x = 0    (passive scalar)
-    # Half-step primitive update using σ as the discrete ∂w/∂x·Δx estimate.
+    # We store (ρ, u, p, ρY) and evolve each by dt/2 using its primitive
+    # PDE (ρY uses the conservation form since it is itself a conserved
+    # density):
+    #   ∂ρ/∂t + u·∂ρ/∂x + ρ·∂u/∂x = 0                 (mass)
+    #   ∂u/∂t + u·∂u/∂x + (1/ρ)·∂p/∂x = 0             (momentum, Toro 14.22)
+    #   ∂p/∂t + u·∂p/∂x + γp·∂u/∂x = 0                (energy, pressure form)
+    #   ∂(ρY)/∂t + u·∂(ρY)/∂x + (ρY)·∂u/∂x = 0        (composition conservation)
+    # σ is the discrete ∂·/∂x · Δx estimate per variable.
     half_dt_dx = 0.5 * dt / dx
     for i in range(n):
-        rho = w[i, 0]; u = w[i, 1]; p = w[i, 2]; Y = w[i, 3]
-        srho = slopes[i, 0]; su = slopes[i, 1]; sp = slopes[i, 2]; sY = slopes[i, 3]
+        rho = w[i, 0]; u = w[i, 1]; p = w[i, 2]; rhoY = w[i, 3]
+        srho = slopes[i, 0]; su = slopes[i, 1]; sp = slopes[i, 2]; srhoY = slopes[i, 3]
 
-        drho = -half_dt_dx * (u * srho + rho * su)
-        du   = -half_dt_dx * (u * su + sp / rho)
-        dp   = -half_dt_dx * (u * sp + gamma * p * su)
-        dY   = -half_dt_dx * u * sY
+        drho  = -half_dt_dx * (u * srho + rho * su)
+        du    = -half_dt_dx * (u * su + sp / rho)
+        dp    = -half_dt_dx * (u * sp + gamma * p * su)
+        drhoY = -half_dt_dx * (u * srhoY + rhoY * su)
 
-        w_pred_L[i, 0] = rho + drho - 0.5 * srho
-        w_pred_L[i, 1] = u   + du   - 0.5 * su
-        w_pred_L[i, 2] = p   + dp   - 0.5 * sp
-        w_pred_L[i, 3] = Y   + dY   - 0.5 * sY
-        w_pred_R[i, 0] = rho + drho + 0.5 * srho
-        w_pred_R[i, 1] = u   + du   + 0.5 * su
-        w_pred_R[i, 2] = p   + dp   + 0.5 * sp
-        w_pred_R[i, 3] = Y   + dY   + 0.5 * sY
+        w_pred_L[i, 0] = rho  + drho  - 0.5 * srho
+        w_pred_L[i, 1] = u    + du    - 0.5 * su
+        w_pred_L[i, 2] = p    + dp    - 0.5 * sp
+        w_pred_L[i, 3] = rhoY + drhoY - 0.5 * srhoY
+        w_pred_R[i, 0] = rho  + drho  + 0.5 * srho
+        w_pred_R[i, 1] = u    + du    + 0.5 * su
+        w_pred_R[i, 2] = p    + dp    + 0.5 * sp
+        w_pred_R[i, 3] = rhoY + drhoY + 0.5 * srhoY
 
     # Step 4: corrector — HLLC at each face.
     # Face j separates cell (j-1) on the left from cell j on the right.
+    # Reconstruction stores ρY in channel 3; we divide by the reconstructed
+    # ρ at each face to get the primitive Y that HLLC expects.
     for j in range(1, n):
-        rhoL = w_pred_R[j - 1, 0]; uL = w_pred_R[j - 1, 1]
-        pL   = w_pred_R[j - 1, 2]; YL = w_pred_R[j - 1, 3]
-        rhoR = w_pred_L[j, 0];     uR = w_pred_L[j, 1]
-        pR   = w_pred_L[j, 2];     YR = w_pred_L[j, 3]
+        rhoL  = w_pred_R[j - 1, 0]; uL = w_pred_R[j - 1, 1]
+        pL    = w_pred_R[j - 1, 2]
+        rhoYL = w_pred_R[j - 1, 3]
+        rhoR  = w_pred_L[j, 0];     uR = w_pred_L[j, 1]
+        pR    = w_pred_L[j, 2]
+        rhoYR = w_pred_L[j, 3]
         # Positivity fallback
         if rhoL <= 0.0 or pL <= 0.0 or rhoR <= 0.0 or pR <= 0.0:
-            rhoL = w[j - 1, 0]; uL = w[j - 1, 1]; pL = w[j - 1, 2]; YL = w[j - 1, 3]
-            rhoR = w[j, 0];     uR = w[j, 1];     pR = w[j, 2];     YR = w[j, 3]
+            rhoL = w[j - 1, 0]; uL = w[j - 1, 1]; pL = w[j - 1, 2]; rhoYL = w[j - 1, 3]
+            rhoR = w[j, 0];     uR = w[j, 1];     pR = w[j, 2];     rhoYR = w[j, 3]
+        YL = rhoYL / rhoL
+        YR = rhoYR / rhoR
 
         f0, f1, f2, f3 = hllc_flux(rhoL, uL, pL, YL, rhoR, uR, pR, YR, gamma)
         Af = area_f[j]
