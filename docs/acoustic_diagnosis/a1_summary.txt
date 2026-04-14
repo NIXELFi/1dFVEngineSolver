@@ -1,0 +1,36 @@
+Test A1 — exhaust primary reflection (windowed extrema)
+=========================================================
+
+Pipe length      : 308.0 mm
+Pipe diameter    : 32.0 mm ID
+n_cells          : 200
+Run duration     : 20.0 ms
+Pulse duration   : 0.50 ms
+Sound speed      : 347.2 m/s
+
+--- nominal (3 bar) ---
+  p_cyl peak            = 3.000 bar
+  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.697 ms  amp=  +85981.1 Pa  impulse=+3.7277e+01 Pa·s
+  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.387 ms  amp= +107643.2 Pa  impulse=+3.6560e+01 Pa·s
+  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.219 ms  amp=  +34415.0 Pa  impulse=+6.9781e+00 Pa·s
+  A1_peak  = +85981.1 Pa    A1_imp  = +3.7277e+01 Pa·s
+  A2_peak  = +107643.2 Pa    A2_imp  = +3.6560e+01 Pa·s
+  A3_peak  = +34415.0 Pa    A3_imp  = +6.9781e+00 Pa·s
+  R_wall_peak  = A2_peak/A1_peak  = +1.2519
+  R_wall       = A2_imp /A1_imp   = +0.9808  <-- primary
+  R_valve_peak = A3_peak/A2_peak  = +0.3197
+  R_valve      = A3_imp /A2_imp   = +0.1909  <-- primary
+
+--- linear (+2 kPa) ---
+  p_cyl peak            = 1.020 bar
+  arrival n=1  window=[ 0.444,  0.944] ms  peak at t= 0.877 ms  amp=   +2868.3 Pa  impulse=+1.3787e+00 Pa·s
+  arrival n=2  window=[ 1.331,  1.831] ms  peak at t= 1.705 ms  amp=   +2866.2 Pa  impulse=+1.3507e+00 Pa·s
+  arrival n=3  window=[ 2.218,  2.718] ms  peak at t= 2.709 ms  amp=   +2895.0 Pa  impulse=-9.5118e-01 Pa·s
+  A1_peak  = +2868.3 Pa    A1_imp  = +1.3787e+00 Pa·s
+  A2_peak  = +2866.2 Pa    A2_imp  = +1.3507e+00 Pa·s
+  A3_peak  = +2895.0 Pa    A3_imp  = -9.5118e-01 Pa·s
+  R_wall_peak  = A2_peak/A1_peak  = +0.9993
+  R_wall       = A2_imp /A1_imp   = +0.9796  <-- primary
+  R_valve_peak = A3_peak/A2_peak  = +1.0100
+  R_valve      = A3_imp /A2_imp   = -0.7042  <-- primary
+

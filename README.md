@@ -5,6 +5,49 @@ with an HLLC Riemann solver and advected composition scalar. Targets the
 Honda CBR600RR I4 with the FSAE 20 mm intake restrictor as used on the
 Sun Devil Motorsports SDM26 car.
 
+---
+
+## ⚠ Capability snapshot (v2.0-rc1, post-acoustic-BC audit)
+
+V2 has been through an acoustic-BC audit (Phases A–C3 on the
+`diag/acoustic-bc` branch). The valve and plenum boundary conditions
+are now characteristically correct, but the junction control-volume
+model still attenuates waves significantly. Until **Phase E**
+(scheduled, not started — see `docs/phase_e_plan.md`) lands, V2's
+prediction reliability splits as follows:
+
+### V2 can answer reliably (today)
+
+- Exhaust gas temperature at the valve face (the V1 entropy-BC bug is fixed).
+- Volumetric efficiency at any operating point (intake-side acoustics work).
+- IMEP / BMEP / FMEP at any operating point.
+- Intake runner length optimization.
+- Plenum volume tradeoffs.
+- Cam timing effects, valve lift effects, valve duration effects.
+- Compression ratio effects.
+- Restrictor diameter effects on breathing.
+- Fuel consumption sensitivity to AFR / spark / Cd / friction coefficients.
+- Cross-configuration comparison for anything whose acoustic length
+  is primarily on the **intake** side.
+
+### V2 cannot answer reliably until Phase E
+
+- **Exhaust primary-length optimization** — the headline limitation.
+- **Exhaust secondary-length optimization** for 4-2-1 topologies.
+- **Collector geometry tradeoffs** (length, diameter, taper).
+- **Tuned-length predictions of any kind on the exhaust side.**
+- **4-2-1 vs 4-1 topology comparison beyond the quasi-steady effects**
+  (the steady-state pressure drop and EGT differences are right;
+  the tuning differences are not).
+
+The full diagnostic and the Phase E plan are at
+[`docs/c3_comparison_report.md`](docs/c3_comparison_report.md) and
+[`docs/phase_e_plan.md`](docs/phase_e_plan.md). The
+acoustic-test suite at `tests/acoustic/` is the regression check that
+will verify Phase E when it lands.
+
+---
+
 This is a parallel rewrite of an earlier MOC-based solver (see
 [`1dMOCEngineSolver`](https://github.com/NIXELFi/1dMOCEngineSolver)) that
 had a structural entropy-transport limitation at the exhaust valve
