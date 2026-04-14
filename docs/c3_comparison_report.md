@@ -4,6 +4,39 @@
 **Branch.** `diag/acoustic-bc`
 **Scope.** 16-point sweep (6000–13500 RPM, 500-RPM steps), 12-cycle minimum, 40-cycle cap, IMEP-convergence stop (0.5 % cycle-to-cycle).
 
+---
+
+## ⚠ Known limitation — tuned-length prediction not yet reliable
+
+**V2 in its current state is NOT reliable for exhaust primary-length
+optimization or any decision involving acoustic tuning of the exhaust
+manifold.** The Phase C1 + C2 fixes corrected the valve and plenum BCs,
+but the junction control-volume model in `bcs/junction_cv.py` still
+attenuates incident waves significantly at each junction crossing. The
+SDM26 4-2-1 manifold requires four junction transmissions per round
+trip, and the measured per-junction transmission of ≈ 0.69 gives a
+round-trip survival of (0.69)⁴ ≈ 0.23. That is enough wave amplitude
+to keep cylinder breathing dynamics realistic at single-point operation
+(EGT correct, IMEP converged, mass conservation at machine precision),
+but **not enough for tuning resonances to compound into visible torque
+or VE peaks across the sweep**.
+
+The diagnostic measurement that pins this down is the A3 manifold
+round-trip reflection coefficient: linear-regime R_round_trip = +0.228
+(the bar for clean tuning prediction is ≥ 0.5, equivalent to per-
+junction transmission ≥ 0.84). The full audit is in
+`docs/acoustic_diagnosis/findings.md`; the Phase E plan that closes
+this gap is in `docs/phase_e_plan.md`.
+
+**Phase E (junction CV characteristic-coupling) is scheduled but not
+started.** Until Phase E is complete, treat any V2 prediction that
+depends on exhaust acoustic tuning as qualitative-only. See the
+"Capabilities" table in `README.md` for a question-by-question
+breakdown of what V2 can and cannot answer reliably in its current
+state.
+
+---
+
 ## TL;DR
 
 - Engine results unchanged in shape from pre-fix. Both SDM25 and SDM26 still show **monotone-decreasing torque from 6000 RPM**, no acoustic tuning peaks above 6000 RPM in either configuration.

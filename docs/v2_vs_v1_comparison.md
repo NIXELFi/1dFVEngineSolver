@@ -3,6 +3,37 @@
 Phase 3 deliverable. Generated from `docs/v2_sweep.json` and
 `docs/v1_sweep.json` by `diagnostics/make_comparison.py`.
 
+> **2026-04-15 update — post-acoustic-BC audit.**
+> This document was originally written before the Phase A acoustic-BC
+> audit. The §"Volumetric efficiency — tuned-length analysis" section
+> below ranked candidate explanations for V2's flat VE curve; the
+> Phase A–C3 audit (commits e81a5bd through 1d14297 on
+> `diag/acoustic-bc`) confirmed candidate **#2 (junction CV stagnation
+> damping)** is the dominant cause and additionally identified the
+> valve and plenum BCs as contributing absorbers. C1 + C2 fixed the
+> valve and plenum BCs; C3 ran the full sweep with the fixes in place
+> and confirmed the junction CV is the remaining absorber.
+>
+> The headline V2 vs V1 numbers below remain valid (EGT, conservation,
+> compute cost, numerical reliability — all unchanged or improved). The
+> tuned-length-analysis section was right about the symptom and right
+> about ranking the junction CV as the leading suspect; the Phase A
+> audit (`docs/acoustic_diagnosis/findings.md`) added quantitative
+> measurements to that diagnosis. The Phase E plan
+> (`docs/phase_e_plan.md`) closes the gap. Until Phase E is complete,
+> the "V2 cannot answer reliably" list in `README.md` documents the
+> tuning-prediction limitation explicitly.
+>
+> **Bottom line vs V1:** V2 is still the better tool today. The valve-
+> entropy fix (V1's largest physical defect, +900 K mean EGT error) is
+> resolved; the conservation discipline (V1's ~1e-3 kg/cycle leak) is
+> resolved; the compute cost (V1's 27× wall-time disadvantage) is
+> resolved. V2 still has a known limitation on exhaust tuned-length
+> prediction that V1 also has (V1 has it for different reasons —
+> non-conservative MOC plus the entropy-BC bug); for the questions
+> the team most needs answered, V2 is uniformly better than V1 today,
+> and Phase E will close the last gap.
+
 ## Summary
 
 Two simulators, same engine (CBR600RR 599cc I4, FSAE 20 mm restrictor,
