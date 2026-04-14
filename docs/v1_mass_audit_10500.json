@@ -1,0 +1,43 @@
+{
+  "rpm": 10500.0,
+  "n_cycles": 3,
+  "warmup_cycles": 2,
+  "n_steps": 5728,
+  "wall_time_s": 50.62168622016907,
+  "total_mass_drift_kg": 5.39512075357464e-05,
+  "mass_in_restrictor_kg": 0.0025223857752136192,
+  "mass_out_collector_kg": -0.005288783144717216,
+  "expected_drift_from_ports_kg": 0.007811168919930835,
+  "drift_after_port_accounting_kg": -0.0077572177123950885,
+  "per_stage_unaccounted_kg": {
+    "extrapolate_boundary": -0.00019959710574586034,
+    "restrictor_plenum": -0.0025729553047921295,
+    "intake_valve_bcs": 3.284844790002266e-06,
+    "exhaust_valve_bcs": -7.792015174668443e-07,
+    "exhaust_junctions": 7.298025533839291e-05,
+    "collector_open_end": -0.005289688221442534,
+    "pipe_interior_MOC": 0.00023760817173959693,
+    "cylinder_advance": -8.071150765088118e-06
+  },
+  "per_stage_unaccounted_abs_kg": {
+    "extrapolate_boundary": 0.0006157614498775683,
+    "restrictor_plenum": 0.015350340719167023,
+    "intake_valve_bcs": 0.00023427765157015007,
+    "exhaust_valve_bcs": 0.0001541538471219791,
+    "exhaust_junctions": 0.0006550639086999623,
+    "collector_open_end": 0.0062623428283760255,
+    "pipe_interior_MOC": 0.014649174517795401,
+    "cylinder_advance": 0.00303950774292167
+  },
+  "per_stage_leak_fraction_of_throughput": {
+    "extrapolate_boundary": -0.07913028518762424,
+    "restrictor_plenum": -1.0200482931974304,
+    "intake_valve_bcs": 0.0013022769246009067,
+    "exhaust_valve_bcs": -0.0003089144908458161,
+    "exhaust_junctions": 0.0289330268413095,
+    "collector_open_end": -2.0970972297029205,
+    "pipe_interior_MOC": 0.0941997747031673,
+    "cylinder_advance": -0.0031998082309216075
+  },
+  "wall_time_total_s": 50.62283706665039
+}
