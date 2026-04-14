@@ -10,15 +10,20 @@ Geometry and coefficients copied from V1 at `1d/engine_simulator/config/cbr600rr
   - valve BCs are entropy-aware ghost-cell fills (V2's main fix).
   - no V1 imports.
 
-Per the spec's stop-gates for Phase 3 single-RPM verification:
-  EGT at exhaust-primary valve face must be 1000-1300 K at 10500 RPM WOT.
-  Cycle-to-cycle mass drift must be < 1e-8 kg.
+Config coverage: every physical parameter that a user might want to sweep
+is a field on SDM26Config. Default construction reproduces the SDM26
+geometry and the SDM25-dyno-reference Wiebe/Woschni coefficients. Any
+scalar can be changed via kwargs, per-pipe lists can be supplied for
+asymmetric geometry, and every field is validated at construction (see
+SDM26Config.__post_init__). Tapered pipes are first-class: pass
+`*_diameter_out` to make that pipe a linearly-tapered cone.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -35,77 +40,413 @@ from cylinder.combustion import WiebeParams
 from cylinder.cylinder import CylinderModel, CylinderGeom
 from cylinder.heat_transfer import WoschniParams
 from cylinder.kinematics import cylinder_phase_offsets, omega_from_rpm
-from cylinder.valve import (
-    ValveParams, INTAKE_LD_TABLE, INTAKE_CD_TABLE,
-    EXHAUST_LD_TABLE, EXHAUST_CD_TABLE,
-)
+from cylinder.valve import ValveParams
+
+
+# ---- default Cd(L/D) tables (2007 CBR600RR) ----
+INTAKE_LD_DEFAULT = (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+INTAKE_CD_DEFAULT = (0.19, 0.38, 0.494, 0.551, 0.57, 0.57)
+EXHAUST_LD_DEFAULT = (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+EXHAUST_CD_DEFAULT = (0.171, 0.333, 0.456, 0.523, 0.542, 0.551)
+
+
+# -------------------- helpers --------------------
+
+
+def linear_diameter_area(length: float, D_in: float, D_out: float):
+    """area_fn(x) for a circular pipe with linearly-varying diameter.
+
+    D_in is diameter at x=0; D_out at x=length. Returns area in m². Used
+    both for straight pipes (D_in == D_out) and tapered pipes.
+    """
+    L = max(length, 1e-20)
+    def area(x: float) -> float:
+        t = x / L
+        if t < 0.0:
+            t = 0.0
+        elif t > 1.0:
+            t = 1.0
+        D = D_in + (D_out - D_in) * t
+        return 0.25 * np.pi * D * D
+    return area
+
+
+def _check_positive(name: str, value: float, unit: str = "") -> None:
+    if value <= 0.0 or not np.isfinite(value):
+        suffix = f" {unit}" if unit else ""
+        raise ValueError(f"{name} must be > 0{suffix}, got {value!r}")
+
+
+def _check_finite(name: str, value: float) -> None:
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite, got {value!r}")
+
+
+def _warn_large_taper(pipe_name: str, D_in: float, D_out: float) -> None:
+    """Emit a physical-reasonableness warning for aggressive taper.
+
+    Area ratio > 9 (diameter ratio > 3) is likely to generate standing
+    shocks under supersonic conditions and strong wave reflections
+    regardless; flag it but do not refuse to run."""
+    if D_in <= 0 or D_out <= 0:
+        return
+    ratio = max(D_in, D_out) / min(D_in, D_out)
+    if ratio > 3.0:
+        warnings.warn(
+            f"{pipe_name}: diameter ratio {ratio:.2f}× (area ratio "
+            f"{ratio**2:.2f}×) is aggressive; expect strong wave "
+            f"reflections at the taper and possible shock formation "
+            f"under supersonic flow. Verify against a known solution.",
+            stacklevel=2,
+        )
 
 
 # -------------------- Config (SDM26 defaults) --------------------
 
 @dataclass
 class SDM26Config:
-    # Engine geometry — CBR600RR
-    bore: float = 0.067
-    stroke: float = 0.0425
-    con_rod: float = 0.0963
-    CR: float = 12.2
+    """Full SDM26 parameterization.
+
+    Every physical quantity is exposed. Defaults reproduce the baseline
+    CBR600RR/SDM26 geometry and the V1-inherited Wiebe+Woschni coefficients.
+
+    Pipe taper: for each pipe type (runner, primary, secondary, collector)
+    you can set `*_diameter_out` to make it a linearly-tapered cone. If
+    the `_out` field is None, the pipe is straight (D_in = D_out).
+
+    Per-pipe asymmetry: for runners, primaries, and secondaries you can
+    supply `*_lengths`, `*_diameters_in`, `*_diameters_out`, `*_wall_Ts`
+    as lists (length 4 for runners/primaries, length 2 for secondaries)
+    to make the pipes nonidentical. If a list is None the scalar default
+    is used for every pipe of that type.
+
+    All lengths in metres, diameters in metres, temperatures in Kelvin,
+    pressures in Pa, angles in degrees.
+    """
+
+    # -------- Engine geometry (cylinder) --------
+    bore: float = 0.067               # m
+    stroke: float = 0.0425             # m
+    con_rod: float = 0.0963            # m
+    CR: float = 12.2                   # compression ratio (unitless)
     n_cylinders: int = 4
     firing_order: tuple = (1, 2, 4, 3)
-    firing_interval: float = 180.0
+    firing_interval: float = 180.0     # degrees CAD between fires
 
-    # Intake runners (4x identical)
+    # -------- Intake runners (×n_cylinders, default all identical) --------
     runner_length: float = 0.245
-    runner_diameter: float = 0.038
+    runner_diameter_in: float = 0.038
+    runner_diameter_out: Optional[float] = None   # None → straight pipe
     runner_n_cells: int = 30
     runner_wall_T: float = 325.0
+    # Per-cylinder overrides: None uses scalar defaults for all runners.
+    runner_lengths: Optional[List[float]] = None
+    runner_diameters_in: Optional[List[float]] = None
+    runner_diameters_out: Optional[List[float]] = None
+    runner_wall_Ts: Optional[List[float]] = None
 
-    # Exhaust primaries (4x, slight D variation in V1 — use 0.032 m here)
+    # -------- Exhaust primaries (×n_cylinders) --------
     primary_length: float = 0.308
-    primary_diameter: float = 0.032
+    primary_diameter_in: float = 0.032
+    primary_diameter_out: Optional[float] = None  # None → straight
     primary_n_cells: int = 30
-    primary_wall_T: float = 1000.0  # V2 physical value (V1 ran 650 K cold)
+    primary_wall_T: float = 1000.0    # V2 physical value (V1 ran 650 K cold)
+    primary_lengths: Optional[List[float]] = None
+    primary_diameters_in: Optional[List[float]] = None
+    primary_diameters_out: Optional[List[float]] = None
+    primary_wall_Ts: Optional[List[float]] = None
 
-    # Exhaust secondaries (2x)
+    # -------- Exhaust secondaries (×2 for 4-2-1 topology) --------
     secondary_length: float = 0.392
-    secondary_diameter: float = 0.038
+    secondary_diameter_in: float = 0.038
+    secondary_diameter_out: Optional[float] = None
     secondary_n_cells: int = 20
     secondary_wall_T: float = 800.0
+    secondary_lengths: Optional[List[float]] = None
+    secondary_diameters_in: Optional[List[float]] = None
+    secondary_diameters_out: Optional[List[float]] = None
+    secondary_wall_Ts: Optional[List[float]] = None
 
-    # Exhaust collector
+    # -------- Exhaust collector (×1) --------
     collector_length: float = 0.1
-    collector_diameter: float = 0.05
+    collector_diameter_in: float = 0.05
+    collector_diameter_out: Optional[float] = None
     collector_n_cells: int = 20
     collector_wall_T: float = 700.0
 
-    # Plenum
-    plenum_volume: float = 0.0015     # m³
-    plenum_length: float = 0.3        # m, somewhat arbitrary 1D stand-in
+    # -------- Plenum (1D FV domain of matched volume) --------
+    plenum_volume: float = 0.0015      # m³
+    plenum_length: float = 0.3         # m, 1D stand-in (area is computed from volume/length)
     plenum_n_cells: int = 20
     plenum_wall_T: float = 320.0
 
-    # Restrictor
+    # -------- Restrictor --------
     restrictor_throat_diameter: float = 0.020
-    restrictor_Cd: float = 0.967       # spec target (V1's 0.926-0.95 was tuned)
+    restrictor_Cd: float = 0.967
 
-    # Ambient
+    # -------- Ambient --------
     p_ambient: float = 101325.0
     T_ambient: float = 300.0
 
-    # Combustion (physics only; no V1 fudge ramps)
+    # -------- Combustion (Wiebe + physics) --------
     wiebe_a: float = 5.0
     wiebe_m: float = 2.0
-    combustion_duration: float = 50.0
-    spark_advance: float = 25.0
-    ignition_delay: float = 7.0
-    eta_comb: float = 0.96
-    q_lhv: float = 44.0e6
-    afr_target: float = 13.1
-    T_wall_cylinder: float = 450.0
+    combustion_duration: float = 50.0  # degrees CAD
+    spark_advance: float = 25.0        # degrees BTDC
+    ignition_delay: float = 7.0        # degrees
+    eta_comb: float = 0.96             # combustion efficiency, physics not a cap
+    q_lhv: float = 44.0e6              # J/kg, gasoline LHV
+    afr_target: float = 13.1           # air-fuel ratio
+    T_wall_cylinder: float = 450.0     # K, Woschni composite wall T
 
-    # Numerics
+    # -------- Woschni coefficients (Heywood/Woschni 1967 defaults) --------
+    woschni_C1_gas_exchange: float = 6.18
+    woschni_C1_compression: float = 2.28
+    woschni_C1_combustion: float = 2.28
+    woschni_C2_combustion: float = 3.24e-3
+
+    # -------- Intake valve --------
+    intake_valve_diameter: float = 0.0275
+    intake_valve_max_lift: float = 0.00856
+    intake_valve_open_angle: float = 350.0
+    intake_valve_close_angle: float = 585.0
+    intake_valve_seat_angle: float = 45.0
+    intake_n_valves: int = 2
+    intake_ld_table: Tuple[float, ...] = INTAKE_LD_DEFAULT
+    intake_cd_table: Tuple[float, ...] = INTAKE_CD_DEFAULT
+
+    # -------- Exhaust valve --------
+    exhaust_valve_diameter: float = 0.023
+    exhaust_valve_max_lift: float = 0.00735
+    exhaust_valve_open_angle: float = 140.0
+    exhaust_valve_close_angle: float = 365.0
+    exhaust_valve_seat_angle: float = 45.0
+    exhaust_n_valves: int = 2
+    exhaust_ld_table: Tuple[float, ...] = EXHAUST_LD_DEFAULT
+    exhaust_cd_table: Tuple[float, ...] = EXHAUST_CD_DEFAULT
+
+    # -------- Numerics --------
     cfl: float = 0.85
     limiter: int = LIMITER_MINMOD
+
+    # ---------------- validation ----------------
+
+    def __post_init__(self):
+        self._validate()
+
+    def _validate(self) -> None:
+        """Physical-reasonableness validation. Raises ValueError on hard
+        errors, warnings.warn on soft issues."""
+        # Engine geometry
+        _check_positive("bore", self.bore, "m")
+        _check_positive("stroke", self.stroke, "m")
+        _check_positive("con_rod", self.con_rod, "m")
+        if self.CR <= 1.0:
+            raise ValueError(f"CR must be > 1, got {self.CR}")
+        if self.con_rod < self.stroke / 2.0:
+            raise ValueError(
+                f"con_rod ({self.con_rod:.4f} m) must be ≥ stroke/2 "
+                f"({self.stroke/2:.4f} m) for the slider-crank to be realisable"
+            )
+        if self.n_cylinders < 1:
+            raise ValueError(f"n_cylinders must be ≥ 1, got {self.n_cylinders}")
+
+        # Pipe lengths and diameters (scalar)
+        for k in ("runner_length", "primary_length", "secondary_length",
+                  "collector_length", "plenum_length"):
+            _check_positive(k, getattr(self, k), "m")
+        for k in ("runner_diameter_in", "primary_diameter_in",
+                  "secondary_diameter_in", "collector_diameter_in",
+                  "restrictor_throat_diameter"):
+            _check_positive(k, getattr(self, k), "m")
+        for k in ("runner_diameter_out", "primary_diameter_out",
+                  "secondary_diameter_out", "collector_diameter_out"):
+            v = getattr(self, k)
+            if v is not None:
+                _check_positive(k, v, "m (or None for straight pipe)")
+        # n_cells
+        for k in ("runner_n_cells", "primary_n_cells", "secondary_n_cells",
+                  "collector_n_cells", "plenum_n_cells"):
+            v = getattr(self, k)
+            if v < 4:
+                raise ValueError(f"{k} must be ≥ 4 (MUSCL-Hancock requires 4), got {v}")
+
+        # Plenum volume
+        _check_positive("plenum_volume", self.plenum_volume, "m³")
+
+        # Ambient
+        _check_positive("p_ambient", self.p_ambient, "Pa")
+        _check_positive("T_ambient", self.T_ambient, "K")
+
+        # Wall temperatures — physical reasonableness
+        for k, T in [
+            ("runner_wall_T", self.runner_wall_T),
+            ("primary_wall_T", self.primary_wall_T),
+            ("secondary_wall_T", self.secondary_wall_T),
+            ("collector_wall_T", self.collector_wall_T),
+            ("plenum_wall_T", self.plenum_wall_T),
+            ("T_wall_cylinder", self.T_wall_cylinder),
+        ]:
+            if T < 200.0 or T > 1500.0:
+                raise ValueError(
+                    f"{k} = {T} K is outside plausible wall-temperature range 200..1500 K"
+                )
+
+        # Restrictor
+        if not 0.0 < self.restrictor_Cd <= 1.0:
+            raise ValueError(
+                f"restrictor_Cd must be in (0, 1], got {self.restrictor_Cd}"
+            )
+
+        # Combustion
+        if not 0.0 < self.eta_comb <= 1.0:
+            raise ValueError(f"eta_comb must be in (0, 1], got {self.eta_comb}")
+        if self.wiebe_a <= 0.0:
+            raise ValueError(f"wiebe_a must be > 0, got {self.wiebe_a}")
+        if self.wiebe_m < 0.0:
+            raise ValueError(f"wiebe_m must be ≥ 0, got {self.wiebe_m}")
+        _check_positive("combustion_duration", self.combustion_duration, "deg")
+        _check_positive("q_lhv", self.q_lhv, "J/kg")
+        _check_positive("afr_target", self.afr_target)
+
+        # Valves
+        for prefix in ("intake", "exhaust"):
+            _check_positive(f"{prefix}_valve_diameter", getattr(self, f"{prefix}_valve_diameter"), "m")
+            _check_positive(f"{prefix}_valve_max_lift", getattr(self, f"{prefix}_valve_max_lift"), "m")
+            if getattr(self, f"{prefix}_n_valves") < 1:
+                raise ValueError(f"{prefix}_n_valves must be ≥ 1")
+            ld = getattr(self, f"{prefix}_ld_table")
+            cd = getattr(self, f"{prefix}_cd_table")
+            if len(ld) != len(cd):
+                raise ValueError(f"{prefix}_ld_table and {prefix}_cd_table must be the same length")
+            if any(x <= 0 for x in ld):
+                raise ValueError(f"{prefix}_ld_table values must all be > 0")
+            if any(not 0.0 <= x <= 1.0 for x in cd):
+                raise ValueError(f"{prefix}_cd_table values must all be in [0, 1]")
+            if list(ld) != sorted(ld):
+                raise ValueError(f"{prefix}_ld_table must be monotone increasing")
+            # Valve event window sanity
+            oa = getattr(self, f"{prefix}_valve_open_angle")
+            ca = getattr(self, f"{prefix}_valve_close_angle")
+            duration = (ca - oa) % 720.0
+            if duration <= 0 or duration > 360.0:
+                raise ValueError(
+                    f"{prefix} valve event window {oa}° → {ca}° gives duration "
+                    f"{duration}°, expected 0 < duration ≤ 360"
+                )
+            # Lift-to-diameter ratio sanity
+            ld_max = getattr(self, f"{prefix}_valve_max_lift") / getattr(self, f"{prefix}_valve_diameter")
+            if ld_max > 0.5:
+                warnings.warn(
+                    f"{prefix} max L/D = {ld_max:.2f} is unusually high (typical < 0.35)",
+                    stacklevel=2,
+                )
+
+        # Per-cylinder lists — length checks
+        n_cyl = self.n_cylinders
+        for k in ("runner_lengths", "runner_diameters_in", "runner_diameters_out",
+                  "runner_wall_Ts",
+                  "primary_lengths", "primary_diameters_in",
+                  "primary_diameters_out", "primary_wall_Ts"):
+            v = getattr(self, k)
+            if v is not None and len(v) != n_cyl:
+                raise ValueError(f"{k} must have length {n_cyl}, got {len(v)}")
+        for k in ("secondary_lengths", "secondary_diameters_in",
+                  "secondary_diameters_out", "secondary_wall_Ts"):
+            v = getattr(self, k)
+            if v is not None and len(v) != 2:
+                raise ValueError(f"{k} must have length 2, got {len(v)}")
+
+        # Per-cylinder list element checks
+        for k in ("runner_lengths", "primary_lengths", "secondary_lengths"):
+            v = getattr(self, k)
+            if v is not None:
+                for i, x in enumerate(v):
+                    _check_positive(f"{k}[{i}]", x, "m")
+        for k in ("runner_diameters_in", "primary_diameters_in", "secondary_diameters_in"):
+            v = getattr(self, k)
+            if v is not None:
+                for i, x in enumerate(v):
+                    _check_positive(f"{k}[{i}]", x, "m")
+        for k in ("runner_diameters_out", "primary_diameters_out", "secondary_diameters_out"):
+            v = getattr(self, k)
+            if v is not None:
+                for i, x in enumerate(v):
+                    if x is not None:
+                        _check_positive(f"{k}[{i}]", x, "m")
+
+        # Taper warnings (soft)
+        for pname, D_in, D_out in [
+            ("runner", self.runner_diameter_in, self.runner_diameter_out or self.runner_diameter_in),
+            ("primary", self.primary_diameter_in, self.primary_diameter_out or self.primary_diameter_in),
+            ("secondary", self.secondary_diameter_in, self.secondary_diameter_out or self.secondary_diameter_in),
+            ("collector", self.collector_diameter_in, self.collector_diameter_out or self.collector_diameter_in),
+        ]:
+            _warn_large_taper(pname, D_in, D_out)
+
+        # CFL
+        if not 0.0 < self.cfl <= 1.0:
+            raise ValueError(f"cfl must be in (0, 1], got {self.cfl}")
+
+        # Cross-pipe geometry compatibility: flag huge area mismatches at junctions
+        # (the junction CV can handle them but waves reflect strongly)
+        runner_D_at_plenum_end = self.runner_diameter_in  # runner LEFT end connects to plenum junction
+        plenum_equiv_D = 2.0 * np.sqrt(self.plenum_volume / (np.pi * self.plenum_length))
+        if plenum_equiv_D / runner_D_at_plenum_end > 10.0:
+            warnings.warn(
+                f"plenum equivalent D ({plenum_equiv_D*1000:.1f} mm) is {plenum_equiv_D/runner_D_at_plenum_end:.1f}× "
+                f"larger than runner inlet D ({runner_D_at_plenum_end*1000:.1f} mm); strong wave "
+                f"reflections expected at the junction.",
+                stacklevel=2,
+            )
+
+    # ---- helpers to extract per-pipe specs ----
+
+    def runner_spec(self, i: int):
+        """Return (length, D_in, D_out, n_cells, wall_T) for runner i in [0, n_cylinders)."""
+        L = self.runner_lengths[i] if self.runner_lengths else self.runner_length
+        D_in = self.runner_diameters_in[i] if self.runner_diameters_in else self.runner_diameter_in
+        D_out_override = self.runner_diameters_out[i] if self.runner_diameters_out else None
+        D_out = D_out_override if D_out_override is not None else (
+            self.runner_diameter_out if self.runner_diameter_out is not None else D_in
+        )
+        wall_T = self.runner_wall_Ts[i] if self.runner_wall_Ts else self.runner_wall_T
+        return L, D_in, D_out, self.runner_n_cells, wall_T
+
+    def primary_spec(self, i: int):
+        L = self.primary_lengths[i] if self.primary_lengths else self.primary_length
+        D_in = self.primary_diameters_in[i] if self.primary_diameters_in else self.primary_diameter_in
+        D_out_override = self.primary_diameters_out[i] if self.primary_diameters_out else None
+        D_out = D_out_override if D_out_override is not None else (
+            self.primary_diameter_out if self.primary_diameter_out is not None else D_in
+        )
+        wall_T = self.primary_wall_Ts[i] if self.primary_wall_Ts else self.primary_wall_T
+        return L, D_in, D_out, self.primary_n_cells, wall_T
+
+    def secondary_spec(self, i: int):
+        L = self.secondary_lengths[i] if self.secondary_lengths else self.secondary_length
+        D_in = self.secondary_diameters_in[i] if self.secondary_diameters_in else self.secondary_diameter_in
+        D_out_override = self.secondary_diameters_out[i] if self.secondary_diameters_out else None
+        D_out = D_out_override if D_out_override is not None else (
+            self.secondary_diameter_out if self.secondary_diameter_out is not None else D_in
+        )
+        wall_T = self.secondary_wall_Ts[i] if self.secondary_wall_Ts else self.secondary_wall_T
+        return L, D_in, D_out, self.secondary_n_cells, wall_T
+
+    def collector_spec(self):
+        D_in = self.collector_diameter_in
+        D_out = self.collector_diameter_out if self.collector_diameter_out is not None else D_in
+        return (self.collector_length, D_in, D_out, self.collector_n_cells,
+                self.collector_wall_T)
+
+    def plenum_spec(self):
+        """Returns (L, D_equiv, n_cells, wall_T). The plenum is straight with
+        area = volume/length; D_equiv is the circular-equivalent diameter
+        used only for hydraulic-D purposes in the friction and heat sources.
+        """
+        A = self.plenum_volume / self.plenum_length
+        D = 2.0 * np.sqrt(A / np.pi)
+        return self.plenum_length, D, self.plenum_n_cells, self.plenum_wall_T
 
 
 # -------------------- Engine model --------------------
@@ -120,62 +461,58 @@ class SDM26Engine:
     def __init__(self, cfg: SDM26Config):
         self.cfg = cfg
 
-        # Plenum pipe (constant area matching plenum_volume/plenum_length)
-        A_plen = cfg.plenum_volume / cfg.plenum_length
+        # Plenum pipe — straight, area = volume/length
+        L_plen, D_plen, n_plen, T_plen = cfg.plenum_spec()
         self.plenum = make_pipe_state(
-            cfg.plenum_n_cells, cfg.plenum_length,
-            area_fn=lambda x: A_plen,
-            gamma=1.4, R_gas=287.0, wall_T=cfg.plenum_wall_T, n_ghost=2,
+            n_plen, L_plen,
+            area_fn=linear_diameter_area(L_plen, D_plen, D_plen),
+            gamma=1.4, R_gas=287.0, wall_T=T_plen, n_ghost=2,
         )
-        # Initialise with ambient static state
         set_uniform(self.plenum, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
                     u=0.0, p=cfg.p_ambient, Y=0.0)
 
-        # Intake runners
-        A_runner = 0.25 * np.pi * cfg.runner_diameter ** 2
+        # Intake runners (per-pipe specs)
         self.runners: List[PipeState] = []
-        for _ in range(4):
+        for i in range(cfg.n_cylinders):
+            L, D_in, D_out, n, wT = cfg.runner_spec(i)
             s = make_pipe_state(
-                cfg.runner_n_cells, cfg.runner_length,
-                area_fn=lambda x: A_runner,
-                gamma=1.4, R_gas=287.0, wall_T=cfg.runner_wall_T, n_ghost=2,
+                n, L, area_fn=linear_diameter_area(L, D_in, D_out),
+                gamma=1.4, R_gas=287.0, wall_T=wT, n_ghost=2,
             )
             set_uniform(s, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
                         u=0.0, p=cfg.p_ambient, Y=0.0)
             self.runners.append(s)
 
         # Exhaust primaries
-        A_primary = 0.25 * np.pi * cfg.primary_diameter ** 2
         self.primaries: List[PipeState] = []
-        for _ in range(4):
+        for i in range(cfg.n_cylinders):
+            L, D_in, D_out, n, wT = cfg.primary_spec(i)
             s = make_pipe_state(
-                cfg.primary_n_cells, cfg.primary_length,
-                area_fn=lambda x: A_primary,
-                gamma=1.4, R_gas=287.0, wall_T=cfg.primary_wall_T, n_ghost=2,
+                n, L, area_fn=linear_diameter_area(L, D_in, D_out),
+                gamma=1.4, R_gas=287.0, wall_T=wT, n_ghost=2,
             )
             set_uniform(s, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
                         u=0.0, p=cfg.p_ambient, Y=0.0)
             self.primaries.append(s)
 
         # Exhaust secondaries
-        A_sec = 0.25 * np.pi * cfg.secondary_diameter ** 2
         self.secondaries: List[PipeState] = []
-        for _ in range(2):
+        for i in range(2):
+            L, D_in, D_out, n, wT = cfg.secondary_spec(i)
             s = make_pipe_state(
-                cfg.secondary_n_cells, cfg.secondary_length,
-                area_fn=lambda x: A_sec,
-                gamma=1.4, R_gas=287.0, wall_T=cfg.secondary_wall_T, n_ghost=2,
+                n, L, area_fn=linear_diameter_area(L, D_in, D_out),
+                gamma=1.4, R_gas=287.0, wall_T=wT, n_ghost=2,
             )
             set_uniform(s, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
                         u=0.0, p=cfg.p_ambient, Y=0.0)
             self.secondaries.append(s)
 
         # Collector
-        A_col = 0.25 * np.pi * cfg.collector_diameter ** 2
+        L_col, D_col_in, D_col_out, n_col, T_col = cfg.collector_spec()
         self.collector = make_pipe_state(
-            cfg.collector_n_cells, cfg.collector_length,
-            area_fn=lambda x: A_col,
-            gamma=1.4, R_gas=287.0, wall_T=cfg.collector_wall_T, n_ghost=2,
+            n_col, L_col,
+            area_fn=linear_diameter_area(L_col, D_col_in, D_col_out),
+            gamma=1.4, R_gas=287.0, wall_T=T_col, n_ghost=2,
         )
         set_uniform(self.collector, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
                     u=0.0, p=cfg.p_ambient, Y=0.0)
@@ -188,33 +525,27 @@ class SDM26Engine:
             self.collector,
         ]
 
-        # Ensure every pipe gets a scratch buffer now (needed by junction CVs
-        # to read junction-face fluxes after the MUSCL step).
         for p in self.all_pipes:
             self._ensure_scratch(p)
 
-        # Junction CVs.
-        # Intake: plenum RIGHT + 4 runner LEFTs
+        # Junction CVs
         self.j_intake = JunctionCV.from_legs(
             [JunctionCVLeg(self.plenum, RIGHT)] +
             [JunctionCVLeg(r, LEFT) for r in self.runners],
             p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
         )
-        # Exhaust J1: primaries 0 & 3 → secondary 0 (cylinders 1, 4 — 180° pair)
         self.j_exh1 = JunctionCV.from_legs(
             [JunctionCVLeg(self.primaries[0], RIGHT),
              JunctionCVLeg(self.primaries[3], RIGHT),
              JunctionCVLeg(self.secondaries[0], LEFT)],
             p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
         )
-        # Exhaust J2: primaries 1 & 2 → secondary 1 (cylinders 2, 3 — 180° pair)
         self.j_exh2 = JunctionCV.from_legs(
             [JunctionCVLeg(self.primaries[1], RIGHT),
              JunctionCVLeg(self.primaries[2], RIGHT),
              JunctionCVLeg(self.secondaries[1], LEFT)],
             p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
         )
-        # Exhaust J3: secondaries 0 & 1 → collector
         self.j_exh3 = JunctionCV.from_legs(
             [JunctionCVLeg(self.secondaries[0], RIGHT),
              JunctionCVLeg(self.secondaries[1], RIGHT),
@@ -238,18 +569,32 @@ class SDM26Engine:
             eta_comb=cfg.eta_comb,
             q_lhv=cfg.q_lhv, afr_target=cfg.afr_target,
         )
-        woschni = WoschniParams(bore=cfg.bore, stroke=cfg.stroke, T_wall=cfg.T_wall_cylinder)
+        woschni = WoschniParams(
+            bore=cfg.bore, stroke=cfg.stroke, T_wall=cfg.T_wall_cylinder,
+            C1_gas_exchange=cfg.woschni_C1_gas_exchange,
+            C1_compression=cfg.woschni_C1_compression,
+            C1_combustion=cfg.woschni_C1_combustion,
+            C2_combustion=cfg.woschni_C2_combustion,
+        )
         intake_valve = ValveParams(
-            diameter=0.0275, max_lift=0.00856,
-            open_angle_deg=350.0, close_angle_deg=585.0,
-            seat_angle_deg=45.0, n_valves=2,
-            ld_table=INTAKE_LD_TABLE, cd_table=INTAKE_CD_TABLE,
+            diameter=cfg.intake_valve_diameter,
+            max_lift=cfg.intake_valve_max_lift,
+            open_angle_deg=cfg.intake_valve_open_angle,
+            close_angle_deg=cfg.intake_valve_close_angle,
+            seat_angle_deg=cfg.intake_valve_seat_angle,
+            n_valves=cfg.intake_n_valves,
+            ld_table=np.array(cfg.intake_ld_table, dtype=np.float64),
+            cd_table=np.array(cfg.intake_cd_table, dtype=np.float64),
         )
         exhaust_valve = ValveParams(
-            diameter=0.023, max_lift=0.00735,
-            open_angle_deg=140.0, close_angle_deg=365.0,
-            seat_angle_deg=45.0, n_valves=2,
-            ld_table=EXHAUST_LD_TABLE, cd_table=EXHAUST_CD_TABLE,
+            diameter=cfg.exhaust_valve_diameter,
+            max_lift=cfg.exhaust_valve_max_lift,
+            open_angle_deg=cfg.exhaust_valve_open_angle,
+            close_angle_deg=cfg.exhaust_valve_close_angle,
+            seat_angle_deg=cfg.exhaust_valve_seat_angle,
+            n_valves=cfg.exhaust_n_valves,
+            ld_table=np.array(cfg.exhaust_ld_table, dtype=np.float64),
+            cd_table=np.array(cfg.exhaust_cd_table, dtype=np.float64),
         )
         self.cylinders: List[CylinderModel] = []
         for i in range(cfg.n_cylinders):
@@ -264,20 +609,16 @@ class SDM26Engine:
     # ---- BC helpers ----
 
     def _junction_fill_ghosts(self) -> None:
-        """Fill each junction's incident-pipe ghosts from CV stagnation state."""
         for j in self.junctions:
             j.fill_ghosts()
 
     def _junction_absorb_fluxes(self, dt: float) -> None:
-        """After all pipes have advanced, absorb face fluxes into each CV."""
         for j in self.junctions:
             j.absorb_fluxes(dt)
 
     # ---- Time step ----
 
     def _ensure_scratch(self, pipe: PipeState):
-        """Lazily allocate per-pipe scratch buffers so we can inspect face
-        fluxes after the MUSCL step."""
         n = pipe.n_total
         buf = getattr(pipe, "_scratch", None)
         if buf is None or buf["w"].shape[0] != n:
@@ -291,7 +632,6 @@ class SDM26Engine:
             pipe._scratch = buf
         return buf
 
-    # Per-cycle flow accumulators (reset by the outer loop).
     def _reset_flow_accumulators(self):
         self._mass_in_restrictor = 0.0
         self._mass_out_collector = 0.0
@@ -301,8 +641,6 @@ class SDM26Engine:
         gamma = 1.4
         A_t = 0.25 * np.pi * cfg.restrictor_throat_diameter ** 2
 
-        # 1. Apply BCs (ghost-cell fills) — these use current state before
-        #    this step's MUSCL advance.
         fill_choked_restrictor_left(
             self.plenum, cfg.p_ambient, cfg.T_ambient, A_t, cfg.restrictor_Cd,
         )
@@ -323,8 +661,6 @@ class SDM26Engine:
 
         fill_transmissive_right(self.collector)
 
-        # 2. MUSCL-Hancock step for every pipe; keep the flux array so we can
-        #    read the boundary face flux directly.
         for pipe in self.all_pipes:
             buf = self._ensure_scratch(pipe)
             muscl_hancock_step(
@@ -333,26 +669,14 @@ class SDM26Engine:
                 buf["w"], buf["slopes"], buf["wL"], buf["wR"], buf["flux"],
             )
 
-        # 3. Read the ACTUAL HLLC flux at the valve faces for cylinder bookkeeping.
-        #    Sign convention for the cylinder:
-        #       mdot_intake = + into cylinder. At runner's RIGHT end, flux
-        #       direction "into cylinder" corresponds to positive flux at the
-        #       face between last real cell and first right-ghost (j = ng+nc).
-        #       mdot_exhaust = + out of cylinder. At primary's LEFT end, flux
-        #       direction "out of cylinder into pipe" is positive at the face
-        #       between last left-ghost and first real cell (j = ng).
         intake_flux = np.zeros(cfg.n_cylinders)
         intake_flux_T = np.zeros(cfg.n_cylinders)
-        intake_energy_flux = np.zeros(cfg.n_cylinders)
         exhaust_flux = np.zeros(cfg.n_cylinders)
         for i in range(cfg.n_cylinders):
             r = self.runners[i]
             j = r.n_ghost + r.n_cells
             f = r._scratch["flux"][j]
-            intake_flux[i] = f[0]       # kg/s, + = into cylinder
-            intake_energy_flux[i] = f[2]  # J/s
-            # Approximate enthalpy T for cylinder's T_intake bookkeeping:
-            # (E+p)u·A = m_flux · h, so h = f[2] / m_flux; T = h · (γ-1)/γ · 1/R_air
+            intake_flux[i] = f[0]
             if abs(f[0]) > 1e-20:
                 h = f[2] / f[0]
                 T_est = h * (gamma - 1.0) / gamma / 287.0
@@ -363,20 +687,17 @@ class SDM26Engine:
             p_pipe = self.primaries[i]
             j = p_pipe.n_ghost
             f = p_pipe._scratch["flux"][j]
-            exhaust_flux[i] = f[0]      # kg/s, + = out of cylinder into pipe
+            exhaust_flux[i] = f[0]
 
-        # 4. Absorb junction-face fluxes into each junction CV.
         self._junction_absorb_fluxes(dt)
 
-        # Diagnostic: integrate restrictor-in and collector-out per step.
         rest_flux = self.plenum._scratch["flux"][self.plenum.n_ghost, 0]
-        self._mass_in_restrictor += rest_flux * dt  # + into plenum
+        self._mass_in_restrictor += rest_flux * dt
         col_flux = self.collector._scratch["flux"][
             self.collector.n_ghost + self.collector.n_cells, 0
         ]
-        self._mass_out_collector += col_flux * dt   # + out of collector
+        self._mass_out_collector += col_flux * dt
 
-        # 5. Source-step (friction + wall heat).
         for pipe in self.all_pipes:
             apply_sources(
                 pipe.q, pipe.area, pipe.hydraulic_D, dt, gamma, 287.0,
@@ -384,8 +705,6 @@ class SDM26Engine:
                 apply_friction=True, apply_heat=True,
             )
 
-        # 5. Advance each cylinder. mdot_intake and mdot_exhaust are the SIGNED
-        #    HLLC face fluxes — this is the shared-flux conservative coupling.
         dtheta = dt * (180.0 / np.pi) * omega_from_rpm(rpm)
         for i, cyl in enumerate(self.cylinders):
             cyl.state.mdot_intake = intake_flux[i]
@@ -400,25 +719,20 @@ class SDM26Engine:
                        convergence_tol_imep: float = 0.005,
                        convergence_min_cycles: int = 3,
                        stop_at_convergence: bool = False) -> dict:
-        """Run at a single RPM.
-
-        If `stop_at_convergence` is True, stop early when the most-recent two
-        cycles' total-engine IMEP differ by less than `convergence_tol_imep`
-        (fractional), subject to at least `convergence_min_cycles` cycles.
-        """
         cfg = self.cfg
         omega = omega_from_rpm(rpm)
         theta = 0.0
         target_theta = n_cycles * 720.0
 
-        # Per-cycle bookkeeping
         cycle_stats = []
         prev_cycle = 0
         last_mass_total = self._system_mass()
         step_count = 0
         self._reset_flow_accumulators()
         converged_cycle = -1
-        while theta < target_theta:
+
+        max_steps = int(1e7)
+        while theta < target_theta and step_count < max_steps:
             dt = cfl_dt(self.plenum.q, self.plenum.area, self.plenum.dx, 1.4,
                         cfg.cfl, self.plenum.n_ghost)
             for p in self.all_pipes:
@@ -438,7 +752,6 @@ class SDM26Engine:
                 m_now = self._system_mass()
                 net_port = self._mass_in_restrictor - self._mass_out_collector
                 actual_drift = m_now - last_mass_total
-                # Engine metrics for this cycle
                 V_d_total = self.cylinders[0].geom.V_d * cfg.n_cylinders
                 total_work = float(sum(c.state.work_cycle for c in self.cylinders))
                 total_intake = float(sum(c.state.m_intake_total for c in self.cylinders))
@@ -471,7 +784,6 @@ class SDM26Engine:
                         f"nonconserv={stats['nonconservation']:+.2e}"
                     )
 
-                # Convergence check: IMEP cycle-to-cycle within tolerance.
                 if (stop_at_convergence
                         and len(cycle_stats) >= convergence_min_cycles + 1):
                     prev_imep = cycle_stats[-2]["imep_bar"]
