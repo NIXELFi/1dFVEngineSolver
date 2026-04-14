@@ -3,10 +3,10 @@
 Reference: Toro, "Riemann Solvers and Numerical Methods for Fluid Dynamics",
 3rd ed., 2009, Chapter 14 (second-order TVD methods).
 
-Reconstruction is on primitive variables (ρ, u, p, Y). Minmod is the default;
-van Leer and superbee are available. The predictor evolves boundary-extrapolated
-primitive states by Δt/2 using the quasi-linear Euler form (Toro 14.22). The
-corrector solves HLLC Riemann problems at each face.
+Reconstruction is on primitive-like variables (ρ, u, p, ρY). Minmod is the
+default; van Leer and superbee are available. The predictor evolves the
+boundary-extrapolated states by Δt/2 using the quasi-linear Euler form
+(Toro 14.22). The corrector solves HLLC Riemann problems at each face.
 
 Quasi-1D formulation: state is (ρA, ρuA, EA, ρYA); flux is
 ((ρu)·A, (ρu²+p)·A, (E+p)u·A, ρuY·A); pressure-area source p·dA/dx is added
@@ -17,6 +17,36 @@ Derivation (momentum): starting from the PDE
   ∂(ρuA)/∂t = -(∂/∂x)(ρu²·A) - A·(∂p/∂x)
              = -(∂/∂x)((ρu²+p)·A) + p·(dA/dx).
 So the quasi-1D conservative form has flux (ρu²+p)·A AND a source +p·dA/dx.
+
+================================================================================
+Why channel 3 is ρY (conservative), not Y (primitive) — READ BEFORE EDITING
+================================================================================
+Channels 0, 1, 2 of the reconstruction vector are primitives (ρ, u, p).
+Channel 3 is the CONSERVATIVE composition density ρY, NOT the primitive
+mass fraction Y.
+
+The reason: two independent primitive reconstructions of ρ and Y produce
+face states ρ_face and Y_face whose product ρ_face · Y_face is NOT equal
+to (ρY)_face from a separate linear reconstruction of ρY — because the
+product of two linears is quadratic. If we fed HLLC a Y_face derived from
+primitive reconstruction, the composition flux ρ·u·Y at the face would
+differ from what an honest conservative reconstruction of ρY would give,
+and the scalar ρY would not be discretely conserved. This is the bug that
+bites every multi-fluid / multi-species Euler code if you're not careful.
+
+The fix: reconstruct ρY linearly in channel 3, and at each face compute the
+face-Y that HLLC needs as
+    Y_face = (ρY)_face_reconstructed / ρ_face_reconstructed .
+That way ρY is conservatively transported (provably, because HLLC × A_face
+× dt is the face flux of ρY that updates the adjacent cells' ρYA) and Y
+is just a derived quantity at faces.
+
+Downstream reader: if you ever think "why is composition weird at channel 3
+when pressure is at 2? Let's move it alongside the primitives," don't.
+Put a comment on your commit explaining the multi-fluid reconstruction
+issue first; if you still want to move it, prove it preserves ρY to
+machine precision on a closed-domain test (tests/test_conservation.py).
+================================================================================
 """
 
 from __future__ import annotations
