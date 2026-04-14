@@ -8,18 +8,18 @@ Round-trip time: 4.608 ms (at c = 347 m/s)
 --- nominal (5 bar pulse) ---
   cyl 1 peak overpressure  = +400.00 kPa (5.000 bar)
   A1 window=[ 0.000,  1.059] ms
-  A1_peak =  +135130.3 Pa  (at t= 0.079 ms)  impulse = +1.3365e+02 Pa·s
+  A1_peak =  +119301.0 Pa  (at t= 0.130 ms)  impulse = +1.1979e+02 Pa·s
   A2 window=[ 4.108,  6.608] ms
-  A2_peak =    +1880.6 Pa  (at t= 4.113 ms)  impulse = +6.3336e-01 Pa·s
-  R_round_trip_peak  = A2_peak/A1_peak = +0.0139
-  R_round_trip       = A2_imp /A1_imp  = +0.0047  <-- primary
+  A2_peak =    +2527.4 Pa  (at t= 5.332 ms)  impulse = +1.3154e+00 Pa·s
+  R_round_trip_peak  = A2_peak/A1_peak = +0.0212
+  R_round_trip       = A2_imp /A1_imp  = +0.0110  <-- primary
 
 --- linear  (+5 kPa) ---
   cyl 1 peak overpressure  = +5.00 kPa (1.050 bar)
   A1 window=[ 0.000,  1.059] ms
-  A1_peak =    +3522.9 Pa  (at t= 0.144 ms)  impulse = +2.5289e+00 Pa·s
+  A1_peak =    +6908.5 Pa  (at t= 0.871 ms)  impulse = +4.7580e+00 Pa·s
   A2 window=[ 4.108,  6.608] ms
-  A2_peak =     +101.0 Pa  (at t= 4.584 ms)  impulse = +5.6220e-02 Pa·s
-  R_round_trip_peak  = A2_peak/A1_peak = +0.0287
-  R_round_trip       = A2_imp /A1_imp  = +0.0222  <-- primary
+  A2_peak =    +3516.5 Pa  (at t= 4.906 ms)  impulse = +1.0830e+00 Pa·s
+  R_round_trip_peak  = A2_peak/A1_peak = +0.5090
+  R_round_trip       = A2_imp /A1_imp  = +0.2276  <-- primary
 
