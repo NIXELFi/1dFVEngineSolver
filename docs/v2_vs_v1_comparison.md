@@ -84,34 +84,48 @@ which is on its face unphysical for a restrictor-limited engine). The
 cycle-20 snapshot captured a transient that happened to look tuned.
 
 **Tuned-length check.** A 308 mm exhaust primary at γ=1.33, T̄≈1200 K
-has an acoustic round-trip time of 2·L/a = 0.616 m / 680 m/s ≈ 0.90 ms.
-For the return pulse to arrive during the ~40° valve-overlap window,
-the engine needs to be at RPM where 40° of crank rotation takes 0.90 ms,
-i.e. RPM ≈ 7400. For quarter-wave resonance (return at next exhaust
-event) the target RPM is roughly 2× that, above the sweep range.
+has a = √(γ·R·T) ≈ 640 m/s and a one-way acoustic time L/a ≈ 0.48 ms.
+Matching the reflected-pulse arrival to a ~40° valve-overlap window
+at half-cycle period gives:
 
-V2's gentle rolloff in VE (81 → 73 → 65 % over 6000 → 8000 → 10000)
-is broadly consistent with the primary being tuned near the low end of
-the sweep (SDM26 primaries carried over from SDM25 geometry), but at
-500 RPM step resolution we cannot see a sharp local maximum. Candidate
-explanations in rank order:
+    RPM ≈ (40/360) / (0.5 · 2·L/a) · 60 ≈ 13 900 RPM.
 
-1. **Effect exists and is smeared by 500 RPM resolution.** The peak
-   may sit between two sweep points. Future step: rerun at 250 RPM
-   resolution around 6500–8000 RPM to see if a local maximum emerges.
-2. **Junction CV damping.** The 0D junction control volume is a
-   stagnation reservoir; incoming kinetic energy is dissipated to
-   internal energy. This is physically reasonable for turbulent
-   merging but it does damp reflected pressure waves through the
-   junction. A future test with a coarser V_j (or a "wave-passing"
-   junction model) would quantify this.
-3. **Primaries are not tuned to any RPM in the sweep.** Possible but
-   lower prior given SDM25 geometry was chosen for this RPM class.
+That is inside the sweep range. If the primaries are acoustically
+tuned to anywhere near 13 900 RPM we should see a local VE peak in
+the 13000–14000 region.
 
-The right next step before drawing geometry conclusions from V2 is a
-250 RPM-resolution probe around the low end of the sweep. Until then,
-"V2 VE is monotone" is a weaker statement than "the primary is
-untuned" — the sweep simply does not resolve enough to say.
+V2's sweep at 500 RPM resolution shows VE 55.8 % at 13000 and 54.3 %
+at 13500 — a smooth monotone decline, no bump. That means either the
+primaries are not tuned to this range (unlikely given the SDM25
+geometry choice) or the junction CV's stagnation treatment damps
+the reflected pressure pulse enough to wash out the VE peak at the
+cylinder.
+
+Candidate explanations, ranked:
+
+1. **Effect exists and the 500 RPM resolution is too coarse to catch
+   it.** A primary-reflection peak is typically a few hundred RPM wide
+   (finite Q from friction and geometric area mismatches), which could
+   fall entirely between two sweep points. Followup step: a 250 RPM
+   probe around 13000–14000 RPM (and separately around 7000–8000 if
+   a half-order reflection matters).
+2. **Junction CV stagnation damping.** The 0D junction CV is a
+   stagnation reservoir — incoming kinetic energy is converted to
+   internal energy each step (no bulk-velocity state in the CV), which
+   is physically correct for turbulent merging in a real manifold but
+   does attenuate reflected pressure pulses through the junction. This
+   is the standard FV approach and is what GT-Power and WAVE do under
+   the hood; a "wave-passing" alternative would relax conservation in
+   exchange for preserving the reflection amplitude. Noted here as a
+   known modeling choice, to revisit only if dyno data shows a tuned-
+   length effect V2 is missing.
+3. **Primaries not tuned to any RPM in the sweep.** Lowest prior but
+   possible.
+
+**Honest conclusion:** V2's 500 RPM sweep does not resolve a peak. We
+need finer resolution and a dyno cross-check before drawing geometry
+conclusions. The 250 RPM probe is the next followup; the junction CV
+revisit is contingent on dyno disagreement.
 
 ## IMEP
 
@@ -138,13 +152,34 @@ compensations; its lower IMEP reflects the Wiebe at its un-fudged
 physical value and the absence of entropy-BC-induced side effects on
 cylinder filling.
 
-**Interpretation:** V2 IMEP is the physically-consistent number, V1
+**Interpretation.** V2 IMEP is the physically-consistent number, V1
 IMEP is empirically-tuned-to-dyno. At the calibration point (10500
 RPM, where V1 was tuned), V1 is closer to the dyno. Away from the
 calibration point, V1's ramp fails (see the oscillating IMEP) and V2
-is more trustworthy. The comparison to dyno for SDM26 is TBD; expect
-V2 to need a small η_comb adjustment once SDM26 dyno data is
-available, but the shape of the IMEP vs RPM curve should not change.
+is more trustworthy.
+
+### Do not read V2 IMEP as a performance prediction
+
+This report is likely to be read by people who will see "V2 IMEP is
+lower than V1 IMEP" and ask "why is V2 predicting less power?"
+Explicit answer: **V2 is not predicting less power. V2 is predicting
+physics.** V1's 8 % surplus at 10500 is an empirical calibration to
+SDM25 dyno data that happens to include ~8 % of correction absorbing
+V1's exhaust-entropy bug.
+
+What V2 gives you right now is a **self-consistent physics baseline**,
+not a performance prediction. SDM26 does not have dyno data yet. Once
+it does, V2's η_comb and FMEP coefficients can be calibrated to SDM26
+hardware — probably one or two scalar adjustments, not the RPM-
+dependent ramp structure V1 needed. Post-calibration, V2 will predict
+**trends** that V1 cannot predict: how IMEP changes with intake length,
+primary length, valve timing. V1's trend predictions are entangled
+with its exhaust bug and its compensating Wiebe cap, so shifting any
+geometry parameter in V1 and reading the resulting IMEP is an
+under-determined exercise. In V2 it is physics.
+
+**Trend prediction, not absolute prediction, is where V2 earns its
+keep.** The EGT plot above is the clearest single example.
 
 ## EGT at the exhaust primary valve face — the rewrite's purpose
 
@@ -247,6 +282,40 @@ not NR elimination). If we wanted V2 to be 100× faster than V1 for
 the sweep, we would JIT the cylinder integrator and the valve BC.
 Not needed today — sub-2-minute sweep is already well under the
 spec's 30-minute target — but flagging for future if needed.
+
+### Design-pattern takeaway
+
+The real lesson from the profiling is not "Numba is fast" — it is
+**"flat-array data layout + `@njit` from day one is worth more than
+any algorithmic cleverness."** V1's 96 %-in-MOC-interior finding
+retroactively explains why V1 is slow: the MOC algorithm is not
+worse than FV per cell, it is just that *per cell work in Python is
+expensive regardless of the scheme.* If V2 had been built with OO
+classes and "we will optimize later," we would have discovered the
+same bottleneck and had to rewrite the interior loop anyway.
+
+The V2 data layout — flat `(n_cells + 2·n_ghost, 4)` conservative
+arrays, `@njit` kernels operating on those arrays, no per-cell
+Python objects anywhere in the hot path — was specified in the
+Phase 2 plan and enforced from the first commit. That is what made
+Numba work, and that is what made V2 27× faster end-to-end and
+1300× faster per-pipe per-step.
+
+For any future simulator in this codebase, the pattern to follow is:
+
+- Flat NumPy arrays for state, geometry, and scratch buffers.
+- `@njit(cache=True)` on every hot-loop kernel.
+- Python only at the orchestration layer (time-stepping loop, BC
+  selection, I/O).
+- Check after first working version: hot kernels should be ≥ 50 %
+  of total wall time. If they are less, you have Python leaking
+  into the hot path — find it and JIT it.
+
+Cite the 27× number to the team for user-facing impact; cite the
+1300× per-pipe-per-step number for the defensible "how much faster
+is the scheme fundamentally" comparison. The 27× is the user-
+experience win, the 1300× is the kernel win, and they are not the
+same number.
 
 ## What V2 predicts that V1 cannot
 
