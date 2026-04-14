@@ -1,0 +1,61 @@
+Test A2 — intake runner reflection
+=====================================
+
+Pipe length      : 245.0 mm
+Pipe diameter    : 38.0 mm ID
+n_cells          : 200
+Run duration     : 15.0 ms
+Pulse duration   : 0.50 ms
+
+--- nominal, plenum far end (far end = plenum) ---
+  p_cyl trough           = 0.700 bar
+  arrival n=1  window=[ 0.353,  0.853] ms  peak at t= 0.552 ms  amp=  -24532.0 Pa  impulse=-1.1112e+01 Pa·s
+  arrival n=2  window=[ 1.059,  1.559] ms  peak at t= 1.558 ms  amp=   -1025.6 Pa  impulse=-3.8849e-01 Pa·s
+  arrival n=3  window=[ 1.764,  2.264] ms  peak at t= 2.262 ms  amp=    +847.8 Pa  impulse=+3.5754e-01 Pa·s
+  A1_peak  = -24532.0 Pa    A1_imp  = -1.1112e+01 Pa·s
+  A2_peak  = -1025.6 Pa    A2_imp  = -3.8849e-01 Pa·s
+  A3_peak  = +847.8 Pa    A3_imp  = +3.5754e-01 Pa·s
+  R_plenum_peak  = A2_peak/A1_peak = +0.0418
+  R_plenum       = A2_imp /A1_imp  = +0.0350  <-- primary
+  R_valve_peak   = A3_peak/A2_peak    = -0.8267
+  R_valve        = A3_imp /A2_imp     = -0.9203  <-- primary
+
+--- linear,  plenum far end (far end = plenum) ---
+  p_cyl trough           = 0.980 bar
+  arrival n=1  window=[ 0.353,  0.853] ms  peak at t= 0.790 ms  amp=   -2515.7 Pa  impulse=-1.2309e+00 Pa·s
+  arrival n=2  window=[ 1.059,  1.559] ms  peak at t= 1.060 ms  amp=    +184.7 Pa  impulse=+8.6855e-02 Pa·s
+  arrival n=3  window=[ 1.764,  2.264] ms  peak at t= 1.870 ms  amp=    +194.2 Pa  impulse=+9.6485e-02 Pa·s
+  A1_peak  = -2515.7 Pa    A1_imp  = -1.2309e+00 Pa·s
+  A2_peak  = +184.7 Pa    A2_imp  = +8.6855e-02 Pa·s
+  A3_peak  = +194.2 Pa    A3_imp  = +9.6485e-02 Pa·s
+  R_plenum_peak  = A2_peak/A1_peak = -0.0734
+  R_plenum       = A2_imp /A1_imp  = -0.0706  <-- primary
+  R_valve_peak   = A3_peak/A2_peak    = +1.0510
+  R_valve        = A3_imp /A2_imp     = +1.1109  <-- primary
+
+--- nominal, wall   far end (ref) (far end = wall) ---
+  p_cyl trough           = 0.700 bar
+  arrival n=1  window=[ 0.353,  0.853] ms  peak at t= 0.552 ms  amp=  -24532.0 Pa  impulse=-1.1112e+01 Pa·s
+  arrival n=2  window=[ 1.059,  1.559] ms  peak at t= 1.459 ms  amp=  -24432.0 Pa  impulse=-9.5620e+00 Pa·s
+  arrival n=3  window=[ 1.764,  2.264] ms  peak at t= 2.263 ms  amp=  +12658.5 Pa  impulse=+5.4768e+00 Pa·s
+  A1_peak  = -24532.0 Pa    A1_imp  = -1.1112e+01 Pa·s
+  A2_peak  = -24432.0 Pa    A2_imp  = -9.5620e+00 Pa·s
+  A3_peak  = +12658.5 Pa    A3_imp  = +5.4768e+00 Pa·s
+  R_wall_peak  = A2_peak/A1_peak = +0.9959
+  R_wall       = A2_imp /A1_imp  = +0.8605  <-- primary
+  R_valve_peak   = A3_peak/A2_peak    = -0.5181
+  R_valve        = A3_imp /A2_imp     = -0.5728  <-- primary
+
+--- linear,  wall   far end (ref) (far end = wall) ---
+  p_cyl trough           = 0.980 bar
+  arrival n=1  window=[ 0.353,  0.853] ms  peak at t= 0.790 ms  amp=   -2515.7 Pa  impulse=-1.2309e+00 Pa·s
+  arrival n=2  window=[ 1.059,  1.559] ms  peak at t= 1.485 ms  amp=   -2332.9 Pa  impulse=-1.1239e+00 Pa·s
+  arrival n=3  window=[ 1.764,  2.264] ms  peak at t= 2.156 ms  amp=   +1844.4 Pa  impulse=+8.9611e-01 Pa·s
+  A1_peak  = -2515.7 Pa    A1_imp  = -1.2309e+00 Pa·s
+  A2_peak  = -2332.9 Pa    A2_imp  = -1.1239e+00 Pa·s
+  A3_peak  = +1844.4 Pa    A3_imp  = +8.9611e-01 Pa·s
+  R_wall_peak  = A2_peak/A1_peak = +0.9273
+  R_wall       = A2_imp /A1_imp  = +0.9131  <-- primary
+  R_valve_peak   = A3_peak/A2_peak    = -0.7906
+  R_valve        = A3_imp /A2_imp     = -0.7973  <-- primary
+

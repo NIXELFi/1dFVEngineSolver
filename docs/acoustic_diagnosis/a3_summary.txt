@@ -1,0 +1,25 @@
+Test A3 — full SDM26 4-2-1 manifold round-trip reflection
+===========================================================
+
+Geometry: 4×P (308 mm × 32 mm) → 4-2 junction → 2×S (392 mm × 38 mm) → 2-1 junction → C (100 mm × 50 mm)
+One-way path:    800 mm
+Round-trip time: 4.608 ms (at c = 347 m/s)
+
+--- nominal (5 bar pulse) ---
+  cyl 1 peak overpressure  = +400.00 kPa (5.000 bar)
+  A1 window=[ 0.000,  1.059] ms
+  A1_peak =  +118440.0 Pa  (at t= 0.130 ms)  impulse = +1.1848e+02 Pa·s
+  A2 window=[ 4.108,  6.608] ms
+  A2_peak =     +897.9 Pa  (at t= 4.109 ms)  impulse = -3.5619e-02 Pa·s
+  R_round_trip_peak  = A2_peak/A1_peak = +0.0076
+  R_round_trip       = A2_imp /A1_imp  = -0.0003  <-- primary
+
+--- linear  (+5 kPa) ---
+  cyl 1 peak overpressure  = +5.00 kPa (1.050 bar)
+  A1 window=[ 0.000,  1.059] ms
+  A1_peak =    +3547.6 Pa  (at t= 0.180 ms)  impulse = +3.5236e+00 Pa·s
+  A2 window=[ 4.108,  6.608] ms
+  A2_peak =     +136.6 Pa  (at t= 4.626 ms)  impulse = +8.0602e-02 Pa·s
+  R_round_trip_peak  = A2_peak/A1_peak = +0.0385
+  R_round_trip       = A2_imp /A1_imp  = +0.0229  <-- primary
+
