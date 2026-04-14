@@ -225,6 +225,14 @@ class SDM26Config:
     exhaust_ld_table: Tuple[float, ...] = EXHAUST_LD_DEFAULT
     exhaust_cd_table: Tuple[float, ...] = EXHAUST_CD_DEFAULT
 
+    # -------- Exhaust topology --------
+    # "4-2-1" = 4 primaries → 2 secondaries → 1 collector (junctions: 3)
+    # "4-1"   = 4 primaries → 1 collector directly (junctions: 1, no secondaries)
+    exhaust_topology: str = "4-2-1"
+
+    # -------- Drivetrain (for wheel-power output) --------
+    drivetrain_efficiency: float = 0.91
+
     # -------- Numerics --------
     cfl: float = 0.85
     limiter: int = LIMITER_MINMOD
@@ -388,6 +396,22 @@ class SDM26Config:
         if not 0.0 < self.cfl <= 1.0:
             raise ValueError(f"cfl must be in (0, 1], got {self.cfl}")
 
+        # Topology
+        if self.exhaust_topology not in ("4-2-1", "4-1"):
+            raise ValueError(
+                f"exhaust_topology must be '4-2-1' or '4-1', got {self.exhaust_topology!r}"
+            )
+        if self.exhaust_topology == "4-1" and self.n_cylinders != 4:
+            raise ValueError(
+                f"4-1 topology requires n_cylinders == 4, got {self.n_cylinders}"
+            )
+
+        # Drivetrain
+        if not 0.0 < self.drivetrain_efficiency <= 1.0:
+            raise ValueError(
+                f"drivetrain_efficiency must be in (0, 1], got {self.drivetrain_efficiency}"
+            )
+
         # Cross-pipe geometry compatibility: flag huge area mismatches at junctions
         # (the junction CV can handle them but waves reflect strongly)
         runner_D_at_plenum_end = self.runner_diameter_in  # runner LEFT end connects to plenum junction
@@ -495,17 +519,18 @@ class SDM26Engine:
                         u=0.0, p=cfg.p_ambient, Y=0.0)
             self.primaries.append(s)
 
-        # Exhaust secondaries
+        # Exhaust secondaries (only for 4-2-1 topology)
         self.secondaries: List[PipeState] = []
-        for i in range(2):
-            L, D_in, D_out, n, wT = cfg.secondary_spec(i)
-            s = make_pipe_state(
-                n, L, area_fn=linear_diameter_area(L, D_in, D_out),
-                gamma=1.4, R_gas=287.0, wall_T=wT, n_ghost=2,
-            )
-            set_uniform(s, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
-                        u=0.0, p=cfg.p_ambient, Y=0.0)
-            self.secondaries.append(s)
+        if cfg.exhaust_topology == "4-2-1":
+            for i in range(2):
+                L, D_in, D_out, n, wT = cfg.secondary_spec(i)
+                s = make_pipe_state(
+                    n, L, area_fn=linear_diameter_area(L, D_in, D_out),
+                    gamma=1.4, R_gas=287.0, wall_T=wT, n_ghost=2,
+                )
+                set_uniform(s, rho=cfg.p_ambient / (287.0 * cfg.T_ambient),
+                            u=0.0, p=cfg.p_ambient, Y=0.0)
+                self.secondaries.append(s)
 
         # Collector
         L_col, D_col_in, D_col_out, n_col, T_col = cfg.collector_spec()
@@ -534,27 +559,37 @@ class SDM26Engine:
             [JunctionCVLeg(r, LEFT) for r in self.runners],
             p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
         )
-        self.j_exh1 = JunctionCV.from_legs(
-            [JunctionCVLeg(self.primaries[0], RIGHT),
-             JunctionCVLeg(self.primaries[3], RIGHT),
-             JunctionCVLeg(self.secondaries[0], LEFT)],
-            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-        )
-        self.j_exh2 = JunctionCV.from_legs(
-            [JunctionCVLeg(self.primaries[1], RIGHT),
-             JunctionCVLeg(self.primaries[2], RIGHT),
-             JunctionCVLeg(self.secondaries[1], LEFT)],
-            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-        )
-        self.j_exh3 = JunctionCV.from_legs(
-            [JunctionCVLeg(self.secondaries[0], RIGHT),
-             JunctionCVLeg(self.secondaries[1], RIGHT),
-             JunctionCVLeg(self.collector, LEFT)],
-            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-        )
-        self.junctions: List[JunctionCV] = [
-            self.j_intake, self.j_exh1, self.j_exh2, self.j_exh3,
-        ]
+        self.junctions: List[JunctionCV] = [self.j_intake]
+
+        if cfg.exhaust_topology == "4-2-1":
+            # 4-2-1: (p0, p3) → s0 ; (p1, p2) → s1 ; (s0, s1) → collector
+            self.j_exh1 = JunctionCV.from_legs(
+                [JunctionCVLeg(self.primaries[0], RIGHT),
+                 JunctionCVLeg(self.primaries[3], RIGHT),
+                 JunctionCVLeg(self.secondaries[0], LEFT)],
+                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+            )
+            self.j_exh2 = JunctionCV.from_legs(
+                [JunctionCVLeg(self.primaries[1], RIGHT),
+                 JunctionCVLeg(self.primaries[2], RIGHT),
+                 JunctionCVLeg(self.secondaries[1], LEFT)],
+                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+            )
+            self.j_exh3 = JunctionCV.from_legs(
+                [JunctionCVLeg(self.secondaries[0], RIGHT),
+                 JunctionCVLeg(self.secondaries[1], RIGHT),
+                 JunctionCVLeg(self.collector, LEFT)],
+                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+            )
+            self.junctions.extend([self.j_exh1, self.j_exh2, self.j_exh3])
+        else:
+            # 4-1: all 4 primaries feed collector directly via one junction CV
+            self.j_exh1 = JunctionCV.from_legs(
+                [JunctionCVLeg(p, RIGHT) for p in self.primaries] +
+                [JunctionCVLeg(self.collector, LEFT)],
+                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+            )
+            self.junctions.append(self.j_exh1)
 
         # Cylinders
         offsets = cylinder_phase_offsets(
@@ -758,7 +793,23 @@ class SDM26Engine:
                 imep_bar = (total_work / V_d_total) / 1e5 if V_d_total > 0 else 0.0
                 rho_atm = cfg.p_ambient / (287.0 * cfg.T_ambient)
                 ve_atm = total_intake / (rho_atm * V_d_total) if V_d_total > 0 else 0.0
-                indicated_power_kW = total_work * rpm / 120.0 / 1000.0
+                indicated_power_W = total_work * rpm / 120.0
+                indicated_power_kW = indicated_power_W / 1000.0
+
+                # V1-style derived quantities: FMEP, brake, wheel, torque.
+                # FMEP correlation (Heywood-style for high-rev 4-cyl bike engine):
+                # fmep[bar] = 0.97 + 0.15·Sp + 0.005·Sp² where Sp = mean piston speed.
+                Sp = 2.0 * cfg.stroke * rpm / 60.0
+                fmep_bar = 0.97 + 0.15 * Sp + 0.005 * Sp * Sp
+                fmep_Pa = fmep_bar * 1e5
+                friction_power_W = fmep_Pa * V_d_total * rpm / 120.0
+                brake_power_W = max(indicated_power_W - friction_power_W, 0.0)
+                omega = 2.0 * np.pi * rpm / 60.0
+                indicated_torque_Nm = indicated_power_W / omega if omega > 0 else 0.0
+                brake_torque_Nm = brake_power_W / omega if omega > 0 else 0.0
+                wheel_power_W = brake_power_W * cfg.drivetrain_efficiency
+                wheel_torque_Nm = brake_torque_Nm * cfg.drivetrain_efficiency
+                bmep_bar = ((total_work - friction_power_W * 120.0 / rpm) / V_d_total) / 1e5 if V_d_total > 0 else 0.0
 
                 stats = {
                     "cycle": new_cycle,
@@ -768,9 +819,24 @@ class SDM26Engine:
                     "mass_out_collector": self._mass_out_collector,
                     "net_port_flow": net_port,
                     "nonconservation": actual_drift - net_port,
+                    # Engine performance
                     "imep_bar": imep_bar,
+                    "bmep_bar": bmep_bar,
+                    "fmep_bar": fmep_bar,
                     "ve_atm": ve_atm,
+                    "intake_mass_per_cycle_g": total_intake * 1000.0,
+                    # Power (3 levels)
                     "indicated_power_kW": indicated_power_kW,
+                    "indicated_power_hp": indicated_power_W / 745.7,
+                    "brake_power_kW": brake_power_W / 1000.0,
+                    "brake_power_hp": brake_power_W / 745.7,
+                    "wheel_power_kW": wheel_power_W / 1000.0,
+                    "wheel_power_hp": wheel_power_W / 745.7,
+                    # Torque (3 levels)
+                    "indicated_torque_Nm": indicated_torque_Nm,
+                    "brake_torque_Nm": brake_torque_Nm,
+                    "wheel_torque_Nm": wheel_torque_Nm,
+                    # Exhaust-side
                     "EGT_mean": float(np.mean([
                         _primary_entrance_T(p, 1.4) for p in self.primaries
                     ])),
