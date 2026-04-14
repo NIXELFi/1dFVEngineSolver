@@ -51,8 +51,12 @@ import numpy as np
 import pytest
 
 from bcs.simple import fill_reflective_left
-from bcs.subsonic import fill_subsonic_inflow_left
-from bcs.valve import fill_valve_ghost
+# Phase C2 (2026-04-14): use the characteristic-correct plenum BC, replacing
+# the over-determined fill_subsonic_inflow_left that the audit identified as
+# absorbing (R_plenum ≈ −0.07).
+from bcs.subsonic import fill_subsonic_inflow_left_characteristic as fill_subsonic_inflow_left
+# Phase C1 (2026-04-14): characteristic + orifice valve BC.
+from bcs.valve import fill_valve_ghost_characteristic as fill_valve_ghost
 from cylinder.valve import (
     INTAKE_CD_TABLE,
     INTAKE_LD_TABLE,
