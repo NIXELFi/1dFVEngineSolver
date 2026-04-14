@@ -27,7 +27,7 @@ from solver.muscl import muscl_hancock_step, cfl_dt, LIMITER_MINMOD
 from solver.sources import apply_sources
 
 from bcs.restrictor import fill_choked_restrictor_left
-from bcs.junction import apply_junction, JunctionLeg, LEFT, RIGHT
+from bcs.junction_cv import JunctionCV, JunctionCVLeg, LEFT, RIGHT
 from bcs.valve import fill_valve_ghost
 from bcs.simple import fill_transmissive_right
 
@@ -188,6 +188,43 @@ class SDM26Engine:
             self.collector,
         ]
 
+        # Ensure every pipe gets a scratch buffer now (needed by junction CVs
+        # to read junction-face fluxes after the MUSCL step).
+        for p in self.all_pipes:
+            self._ensure_scratch(p)
+
+        # Junction CVs.
+        # Intake: plenum RIGHT + 4 runner LEFTs
+        self.j_intake = JunctionCV.from_legs(
+            [JunctionCVLeg(self.plenum, RIGHT)] +
+            [JunctionCVLeg(r, LEFT) for r in self.runners],
+            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+        )
+        # Exhaust J1: primaries 0 & 3 → secondary 0 (cylinders 1, 4 — 180° pair)
+        self.j_exh1 = JunctionCV.from_legs(
+            [JunctionCVLeg(self.primaries[0], RIGHT),
+             JunctionCVLeg(self.primaries[3], RIGHT),
+             JunctionCVLeg(self.secondaries[0], LEFT)],
+            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+        )
+        # Exhaust J2: primaries 1 & 2 → secondary 1 (cylinders 2, 3 — 180° pair)
+        self.j_exh2 = JunctionCV.from_legs(
+            [JunctionCVLeg(self.primaries[1], RIGHT),
+             JunctionCVLeg(self.primaries[2], RIGHT),
+             JunctionCVLeg(self.secondaries[1], LEFT)],
+            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+        )
+        # Exhaust J3: secondaries 0 & 1 → collector
+        self.j_exh3 = JunctionCV.from_legs(
+            [JunctionCVLeg(self.secondaries[0], RIGHT),
+             JunctionCVLeg(self.secondaries[1], RIGHT),
+             JunctionCVLeg(self.collector, LEFT)],
+            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+        )
+        self.junctions: List[JunctionCV] = [
+            self.j_intake, self.j_exh1, self.j_exh2, self.j_exh3,
+        ]
+
         # Cylinders
         offsets = cylinder_phase_offsets(
             cfg.n_cylinders, list(cfg.firing_order), cfg.firing_interval,
@@ -226,31 +263,15 @@ class SDM26Engine:
 
     # ---- BC helpers ----
 
-    def _apply_intake_junction(self) -> float:
-        """5-leg junction between plenum RIGHT and all 4 runners' LEFT ends."""
-        legs = [JunctionLeg(self.plenum, RIGHT, sign=+1)]
-        for r in self.runners:
-            legs.append(JunctionLeg(r, LEFT, sign=-1))
-        return apply_junction(legs)
+    def _junction_fill_ghosts(self) -> None:
+        """Fill each junction's incident-pipe ghosts from CV stagnation state."""
+        for j in self.junctions:
+            j.fill_ghosts()
 
-    def _apply_exhaust_junctions(self):
-        """Firing pairs (1,4)→secondary_0, (2,3)→secondary_1; secondaries → collector."""
-        j1 = apply_junction([
-            JunctionLeg(self.primaries[0], RIGHT, sign=+1),
-            JunctionLeg(self.primaries[3], RIGHT, sign=+1),
-            JunctionLeg(self.secondaries[0], LEFT, sign=-1),
-        ])
-        j2 = apply_junction([
-            JunctionLeg(self.primaries[1], RIGHT, sign=+1),
-            JunctionLeg(self.primaries[2], RIGHT, sign=+1),
-            JunctionLeg(self.secondaries[1], LEFT, sign=-1),
-        ])
-        j3 = apply_junction([
-            JunctionLeg(self.secondaries[0], RIGHT, sign=+1),
-            JunctionLeg(self.secondaries[1], RIGHT, sign=+1),
-            JunctionLeg(self.collector, LEFT, sign=-1),
-        ])
-        return j1, j2, j3
+    def _junction_absorb_fluxes(self, dt: float) -> None:
+        """After all pipes have advanced, absorb face fluxes into each CV."""
+        for j in self.junctions:
+            j.absorb_fluxes(dt)
 
     # ---- Time step ----
 
@@ -270,6 +291,11 @@ class SDM26Engine:
             pipe._scratch = buf
         return buf
 
+    # Per-cycle flow accumulators (reset by the outer loop).
+    def _reset_flow_accumulators(self):
+        self._mass_in_restrictor = 0.0
+        self._mass_out_collector = 0.0
+
     def step(self, theta_deg: float, dt: float, rpm: float):
         cfg = self.cfg
         gamma = 1.4
@@ -280,7 +306,7 @@ class SDM26Engine:
         fill_choked_restrictor_left(
             self.plenum, cfg.p_ambient, cfg.T_ambient, A_t, cfg.restrictor_Cd,
         )
-        self._apply_intake_junction()
+        self._junction_fill_ghosts()
 
         for i, cyl in enumerate(self.cylinders):
             theta_local = cyl.local_theta(theta_deg)
@@ -295,7 +321,6 @@ class SDM26Engine:
                 cyl.state.p, cyl.state.T, cyl.state.x_b,
             )
 
-        self._apply_exhaust_junctions()
         fill_transmissive_right(self.collector)
 
         # 2. MUSCL-Hancock step for every pipe; keep the flux array so we can
@@ -340,7 +365,18 @@ class SDM26Engine:
             f = p_pipe._scratch["flux"][j]
             exhaust_flux[i] = f[0]      # kg/s, + = out of cylinder into pipe
 
-        # 4. Source-step (friction + wall heat).
+        # 4. Absorb junction-face fluxes into each junction CV.
+        self._junction_absorb_fluxes(dt)
+
+        # Diagnostic: integrate restrictor-in and collector-out per step.
+        rest_flux = self.plenum._scratch["flux"][self.plenum.n_ghost, 0]
+        self._mass_in_restrictor += rest_flux * dt  # + into plenum
+        col_flux = self.collector._scratch["flux"][
+            self.collector.n_ghost + self.collector.n_cells, 0
+        ]
+        self._mass_out_collector += col_flux * dt   # + out of collector
+
+        # 5. Source-step (friction + wall heat).
         for pipe in self.all_pipes:
             apply_sources(
                 pipe.q, pipe.area, pipe.hydraulic_D, dt, gamma, 287.0,
@@ -371,6 +407,7 @@ class SDM26Engine:
         prev_cycle = 0
         last_mass_total = self._system_mass()
         step_count = 0
+        self._reset_flow_accumulators()
         while theta < target_theta:
             dt = cfl_dt(self.plenum.q, self.plenum.area, self.plenum.dx, 1.4,
                         cfg.cfl, self.plenum.n_ghost)
@@ -389,10 +426,16 @@ class SDM26Engine:
             new_cycle = int(theta / 720.0)
             if new_cycle > prev_cycle:
                 m_now = self._system_mass()
+                net_port = self._mass_in_restrictor - self._mass_out_collector
+                actual_drift = m_now - last_mass_total
                 stats = {
                     "cycle": new_cycle,
                     "mass_total": m_now,
-                    "mass_drift": m_now - last_mass_total,
+                    "mass_drift": actual_drift,
+                    "mass_in_restrictor": self._mass_in_restrictor,
+                    "mass_out_collector": self._mass_out_collector,
+                    "net_port_flow": net_port,
+                    "nonconservation": actual_drift - net_port,
                     "cylinders": [
                         {
                             "m": c.state.m,
@@ -411,12 +454,16 @@ class SDM26Engine:
                 cycle_stats.append(stats)
                 last_mass_total = m_now
                 if verbose:
-                    print(f"  cycle {new_cycle}: mass={m_now:.4e} kg, EGT={stats['EGT_mean']:.0f} K")
-                # Reset per-cycle accumulators
+                    print(
+                        f"  cycle {new_cycle}: mass={m_now:.4e}  drift={actual_drift:+.3e}  "
+                        f"in_restr={self._mass_in_restrictor:+.3e}  out_coll={self._mass_out_collector:+.3e}  "
+                        f"nonconserv={stats['nonconservation']:+.3e}  EGT={stats['EGT_mean']:.0f}K"
+                    )
                 for c in self.cylinders:
                     c.state.m_intake_total = 0.0
                     c.state.m_exhaust_total = 0.0
                     c.state.work_cycle = 0.0
+                self._reset_flow_accumulators()
                 prev_cycle = new_cycle
 
         return {
@@ -433,6 +480,8 @@ class SDM26Engine:
             total += float(p.dx * p.q[s, I_RHO_A].sum())
         for c in self.cylinders:
             total += float(c.state.m)
+        for j in self.junctions:
+            total += float(j.M)
         return total
 
 
