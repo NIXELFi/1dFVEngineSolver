@@ -396,7 +396,16 @@ class SDM26Engine:
     # ---- Run loop ----
 
     def run_single_rpm(self, rpm: float, n_cycles: int = 5,
-                       verbose: bool = False) -> dict:
+                       verbose: bool = False,
+                       convergence_tol_imep: float = 0.005,
+                       convergence_min_cycles: int = 3,
+                       stop_at_convergence: bool = False) -> dict:
+        """Run at a single RPM.
+
+        If `stop_at_convergence` is True, stop early when the most-recent two
+        cycles' total-engine IMEP differ by less than `convergence_tol_imep`
+        (fractional), subject to at least `convergence_min_cycles` cycles.
+        """
         cfg = self.cfg
         omega = omega_from_rpm(rpm)
         theta = 0.0
@@ -408,6 +417,7 @@ class SDM26Engine:
         last_mass_total = self._system_mass()
         step_count = 0
         self._reset_flow_accumulators()
+        converged_cycle = -1
         while theta < target_theta:
             dt = cfl_dt(self.plenum.q, self.plenum.area, self.plenum.dx, 1.4,
                         cfg.cfl, self.plenum.n_ghost)
@@ -428,6 +438,15 @@ class SDM26Engine:
                 m_now = self._system_mass()
                 net_port = self._mass_in_restrictor - self._mass_out_collector
                 actual_drift = m_now - last_mass_total
+                # Engine metrics for this cycle
+                V_d_total = self.cylinders[0].geom.V_d * cfg.n_cylinders
+                total_work = float(sum(c.state.work_cycle for c in self.cylinders))
+                total_intake = float(sum(c.state.m_intake_total for c in self.cylinders))
+                imep_bar = (total_work / V_d_total) / 1e5 if V_d_total > 0 else 0.0
+                rho_atm = cfg.p_ambient / (287.0 * cfg.T_ambient)
+                ve_atm = total_intake / (rho_atm * V_d_total) if V_d_total > 0 else 0.0
+                indicated_power_kW = total_work * rpm / 120.0 / 1000.0
+
                 stats = {
                     "cycle": new_cycle,
                     "mass_total": m_now,
@@ -436,17 +455,9 @@ class SDM26Engine:
                     "mass_out_collector": self._mass_out_collector,
                     "net_port_flow": net_port,
                     "nonconservation": actual_drift - net_port,
-                    "cylinders": [
-                        {
-                            "m": c.state.m,
-                            "p": c.state.p,
-                            "T": c.state.T,
-                            "m_intake": c.state.m_intake_total,
-                            "m_exhaust": c.state.m_exhaust_total,
-                            "work": c.state.work_cycle,
-                        }
-                        for c in self.cylinders
-                    ],
+                    "imep_bar": imep_bar,
+                    "ve_atm": ve_atm,
+                    "indicated_power_kW": indicated_power_kW,
                     "EGT_mean": float(np.mean([
                         _primary_entrance_T(p, 1.4) for p in self.primaries
                     ])),
@@ -455,10 +466,21 @@ class SDM26Engine:
                 last_mass_total = m_now
                 if verbose:
                     print(
-                        f"  cycle {new_cycle}: mass={m_now:.4e}  drift={actual_drift:+.3e}  "
-                        f"in_restr={self._mass_in_restrictor:+.3e}  out_coll={self._mass_out_collector:+.3e}  "
-                        f"nonconserv={stats['nonconservation']:+.3e}  EGT={stats['EGT_mean']:.0f}K"
+                        f"  cycle {new_cycle:3d}: IMEP={imep_bar:6.2f} bar  VE={ve_atm*100:6.2f}%  "
+                        f"EGT={stats['EGT_mean']:5.0f} K  drift={actual_drift:+.3e}  "
+                        f"nonconserv={stats['nonconservation']:+.2e}"
                     )
+
+                # Convergence check: IMEP cycle-to-cycle within tolerance.
+                if (stop_at_convergence
+                        and len(cycle_stats) >= convergence_min_cycles + 1):
+                    prev_imep = cycle_stats[-2]["imep_bar"]
+                    this_imep = cycle_stats[-1]["imep_bar"]
+                    if abs(prev_imep) > 1e-6:
+                        rel = abs(this_imep - prev_imep) / abs(prev_imep)
+                        if rel < convergence_tol_imep and converged_cycle < 0:
+                            converged_cycle = new_cycle
+
                 for c in self.cylinders:
                     c.state.m_intake_total = 0.0
                     c.state.m_exhaust_total = 0.0
@@ -466,11 +488,16 @@ class SDM26Engine:
                 self._reset_flow_accumulators()
                 prev_cycle = new_cycle
 
+                if stop_at_convergence and converged_cycle > 0 and new_cycle >= converged_cycle + 1:
+                    break
+
         return {
             "rpm": rpm,
-            "n_cycles": n_cycles,
+            "n_cycles_requested": n_cycles,
+            "n_cycles_run": len(cycle_stats),
             "step_count": step_count,
             "cycle_stats": cycle_stats,
+            "converged_cycle": converged_cycle,
         }
 
     def _system_mass(self) -> float:
