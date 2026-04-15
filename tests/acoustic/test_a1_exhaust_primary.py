@@ -175,7 +175,7 @@ def run_a1(
     else:
         raise ValueError(f"far_end_bc must be 'wall' or 'plenum', got {far_end_bc!r}")
 
-    def bc_apply(t: float) -> None:
+    def bc_apply(t: float, dt: float) -> None:
         p_cyl = p_pulse if t < T_PULSE_S else P_ATM
         valve_bc_fn(
             pipe, pipe_end="left", valve_type="exhaust", vp=vp,

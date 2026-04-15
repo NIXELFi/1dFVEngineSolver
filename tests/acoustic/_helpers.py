@@ -253,9 +253,10 @@ def run_acoustic(
     # rows AFTER the run (we record every step into wf_rows and decimate).
 
     while t < t_end:
-        bc_apply(t)
-
-        # Global dt = min CFL dt across pipes
+        # Compute dt BEFORE applying BCs so that characteristic-junction
+        # BCs (which need dt for their MUSCL-aware residual) can be
+        # filled correctly. cfl_dt only reads real cells so it does not
+        # need valid ghost state.
         dt = min(
             cfl_dt(pipe.q, pipe.area, pipe.dx, gamma, cfl, pipe.n_ghost)
             for pipe in pipes.values()
@@ -265,6 +266,8 @@ def run_acoustic(
         if t + dt > t_end:
             dt = t_end - t
         dt_history.append(dt)
+
+        bc_apply(t, dt)
 
         for pipe in pipes.values():
             step_pipe_no_sources(pipe, dt, gamma=gamma)

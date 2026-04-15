@@ -180,7 +180,7 @@ def run_a3(*, p_cyl_peak_bar: float, label: str):
 
     p_pulse = p_cyl_peak_bar * 1e5
 
-    def bc_apply(t: float) -> None:
+    def bc_apply(t: float, dt: float) -> None:
         # Cylinder 1: pulse. Cylinders 2-4: held at atmospheric.
         for i, name in enumerate(["P0", "P1", "P2", "P3"]):
             primary = pipes[name]

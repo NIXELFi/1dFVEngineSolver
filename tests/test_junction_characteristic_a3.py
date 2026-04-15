@@ -106,7 +106,7 @@ def _run_a3_characteristic(*, p_cyl_peak_bar: float, label: str):
 
     p_pulse = p_cyl_peak_bar * 1e5
 
-    def bc_apply(t: float) -> None:
+    def bc_apply(t: float, dt: float) -> None:
         for i, name in enumerate(["P0", "P1", "P2", "P3"]):
             primary = pipes[name]
             p_cyl = p_pulse if (i == 0 and t < T_PULSE_S) else P_ATM
@@ -116,7 +116,7 @@ def _run_a3_characteristic(*, p_cyl_peak_bar: float, label: str):
                 p_cyl=p_cyl, T_cyl=T_ATM, xb_cyl=0.0,
             )
         for j in junctions:
-            j.fill_ghosts()
+            j.fill_ghosts(dt)
         fill_transmissive_right(C)
 
     def post_step_hook(_t: float, dt: float) -> None:

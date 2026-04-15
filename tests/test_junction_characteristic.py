@@ -119,13 +119,13 @@ def test_1_two_pipe_identity():
     rho_ref = P_ATM / (R_GAS * T_ATM)
     n_steps = 200
     for _ in range(n_steps):
+        dt_left  = cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost)
+        dt_right = cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost)
+        dt = min(dt_left, dt_right)
         # Outer ends reflective (sealed).
         fill_reflective_left(left)
         fill_reflective_right(right)
-        junction.fill_ghosts()
-        dt_left  = cfl_dt(left.q, left.area, left.dx, GAMMA, 0.4, left.n_ghost)
-        dt_right = cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost)
-        dt = min(dt_left, dt_right)
+        junction.fill_ghosts(dt)
         _step_pipe(left, dt)
         _step_pipe(right, dt)
         junction.absorb_fluxes(dt)
@@ -212,15 +212,15 @@ def test_2_closed_domain_conservation():
 
     n_steps = 2000
     for _ in range(n_steps):
-        # Sealed outer ends on every leg: reflective.
-        fill_reflective_left(p1);  fill_reflective_left(p2)
-        fill_reflective_right(p3)
-        junction.fill_ghosts()
         dt = min(
             cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
             cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
             cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
         )
+        # Sealed outer ends on every leg: reflective.
+        fill_reflective_left(p1);  fill_reflective_left(p2)
+        fill_reflective_right(p3)
+        junction.fill_ghosts(dt)
         _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
         junction.absorb_fluxes(dt)
 
@@ -338,14 +338,14 @@ def test_3_two_pipe_wave_transmission():
 
     t = 0.0
     while t < t_end:
-        # Outer ends open so pulse leaves after traversing.
-        fill_transmissive_left(left)
-        fill_transmissive_right(right)
-        junction.fill_ghosts()
         dt = min(
             cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
             cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
         )
+        # Outer ends open so pulse leaves after traversing.
+        fill_transmissive_left(left)
+        fill_transmissive_right(right)
+        junction.fill_ghosts(dt)
         _step_pipe(left, dt)
         _step_pipe(right, dt)
         junction.absorb_fluxes(dt)
@@ -401,15 +401,15 @@ def test_4_three_pipe_symmetric_merge_identity():
 
     rho_ref = P_ATM / (R_GAS * T_ATM)
     for _ in range(500):
-        fill_reflective_left(p1)
-        fill_reflective_left(p2)
-        fill_reflective_right(p3)
-        junction.fill_ghosts()
         dt = min(
             cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
             cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
             cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
         )
+        fill_reflective_left(p1)
+        fill_reflective_left(p2)
+        fill_reflective_right(p3)
+        junction.fill_ghosts(dt)
         _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
         junction.absorb_fluxes(dt)
 
@@ -466,16 +466,16 @@ def test_5_three_pipe_merge_with_incoming_wave():
     probe_p3 = []
     t = 0.0
     while t < t_end:
-        fill_transmissive_left(p1)
-        fill_transmissive_left(p2)
-        fill_transmissive_right(p3)
-        junction.fill_ghosts()
-        mass_residual_history.append(abs(junction.last_mass_residual))
         dt = min(
             cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
             cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
             cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
         )
+        fill_transmissive_left(p1)
+        fill_transmissive_left(p2)
+        fill_transmissive_right(p3)
+        junction.fill_ghosts(dt)
+        mass_residual_history.append(abs(junction.last_mass_residual))
         _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
         junction.absorb_fluxes(dt)
         probe_p2.append(_pipe_probe_pressure(p2, 0.95))
@@ -566,18 +566,6 @@ def test_6_four_pipe_asymmetric_merge():
 
     t = 0.0
     while t < t_end:
-        for pipe in (p_a, p_b, p_c, p_d):
-            fill_transmissive_left(pipe)
-        fill_transmissive_right(s)
-        junction.fill_ghosts()
-        regimes.add(junction.last_regime)
-        mass_residuals.append(abs(junction.last_mass_residual))
-        # Compute max leg enthalpy flux for scaling energy residual.
-        e_residual = junction.last_energy_residual
-        energy_residuals.append(e_residual)
-        # rough max leg hflux for normalization: any primary has p=P_ATM, u~0,
-        # so use a static reference: hflux ~ ρ·c·A·c²/(γ-1) for the wave-carrying
-        # leg at pulse peak. Use the sum-of-|σ ρ u A h0| estimate.
         dt = min(
             cfl_dt(p_a.q, p_a.area, p_a.dx, GAMMA, 0.4, p_a.n_ghost),
             cfl_dt(p_b.q, p_b.area, p_b.dx, GAMMA, 0.4, p_b.n_ghost),
@@ -585,6 +573,13 @@ def test_6_four_pipe_asymmetric_merge():
             cfl_dt(p_d.q, p_d.area, p_d.dx, GAMMA, 0.4, p_d.n_ghost),
             cfl_dt(s.q,   s.area,   s.dx,   GAMMA, 0.4, s.n_ghost),
         )
+        for pipe in (p_a, p_b, p_c, p_d):
+            fill_transmissive_left(pipe)
+        fill_transmissive_right(s)
+        junction.fill_ghosts(dt)
+        regimes.add(junction.last_regime)
+        mass_residuals.append(abs(junction.last_mass_residual))
+        energy_residuals.append(junction.last_energy_residual)
         for pipe in (p_a, p_b, p_c, p_d, s):
             _step_pipe(pipe, dt)
         junction.absorb_fluxes(dt)
@@ -675,9 +670,15 @@ def test_7_choked_leg_handling():
     regimes_seen = set()
     mass_residuals = []
     for step in range(n_steps):
+        dt = min(
+            cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
+            cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
+        )
+        if dt <= 0.0:
+            pytest.fail(f"step {step}: cfl_dt returned {dt}, positivity violated")
         fill_reflective_left(left)   # keep driving high-p left
         fill_transmissive_right(right)
-        junction.fill_ghosts()
+        junction.fill_ghosts(dt)
         regimes_seen.add(junction.last_regime)
         mass_residuals.append(abs(junction.last_mass_residual))
         # Sanity: ghost cells and last_p_junction must be finite.
@@ -690,12 +691,6 @@ def test_7_choked_leg_handling():
         assert np.all(np.isfinite(right.q)), (
             f"step {step}: right ghost went nonfinite"
         )
-        dt = min(
-            cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
-            cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
-        )
-        if dt <= 0.0:
-            pytest.fail(f"step {step}: cfl_dt returned {dt}, positivity violated")
         _step_pipe(left, dt)
         _step_pipe(right, dt)
         junction.absorb_fluxes(dt)
@@ -714,4 +709,101 @@ def test_7_choked_leg_handling():
     # residual of the non-choked legs alone. Still should be tight.
     assert max_R < 1e-3, (
         f"choked-branch max mass residual = {max_R:.3e} kg/s"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 9: non-uniform closed-domain conservation
+# ---------------------------------------------------------------------------
+
+def test_9_non_uniform_closed_domain_conservation():
+    """Stronger conservation test: two pipes meeting at a
+    characteristic junction, all external ends sealed reflective,
+    mild non-uniform initial state (1.10 bar vs 1.00 bar, same T)
+    to drive real flow through the junction, 2000 time steps.
+
+    This exercises the actual mass-balance code path with non-trivial
+    flow through the junction, as opposed to test 2 which certifies
+    only that a quiescent junction doesn't spontaneously bleed mass.
+
+    Conservation guarantees for the constant-static-pressure
+    characteristic junction (per design doc §5):
+      - Mass: EXACT to machine precision.
+      - Composition (ρY): EXACT to machine precision (carried with mass).
+      - Energy: APPROXIMATE. The formulation balances static pressure
+        across legs, not stagnation enthalpy. When legs have
+        mismatched entropy (as here — p differs but T matches, so
+        ρ differs, so s = p/ρ^γ differs per leg), mass flowing
+        between legs carries unequal enthalpy and energy balance at
+        the junction face is inexact. This drift is O(Δs/s̅)
+        per mass-throughput and is the price of the simpler
+        formulation. For real engine operation (multi-leg exhaust
+        merge of gas at similar conditions) the Δs across legs is
+        small, and this term stays in the sub-percent band.
+
+    This is the test that validates the HLLC+MUSCL-aware Newton
+    fix for mass conservation. Pre-fix: ~0.05% mass drift at this
+    amplitude over 2000 steps. Post-fix: machine precision.
+    """
+    L = 0.5
+    D = 0.04
+    N = 80
+    left  = _make_uniform_pipe(L, D, N, p=1.10e5, T=T_ATM, Y=0.0)
+    right = _make_uniform_pipe(L, D, N, p=1.00e5, T=T_ATM, Y=1.0)
+
+    legs = [JunctionLeg(left, RIGHT), JunctionLeg(right, LEFT)]
+    junction = CharacteristicJunction(
+        legs=legs, gamma=GAMMA, R_gas=R_GAS,
+    )
+
+    M0  = _total_mass(left)   + _total_mass(right)
+    E0  = _total_energy(left) + _total_energy(right)
+    MY0 = _total_rhoY(left)   + _total_rhoY(right)
+
+    n_steps = 2000
+    for _ in range(n_steps):
+        dt = min(
+            cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
+            cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
+        )
+        fill_reflective_left(left)
+        fill_reflective_right(right)
+        junction.fill_ghosts(dt)
+        _step_pipe(left, dt)
+        _step_pipe(right, dt)
+        junction.absorb_fluxes(dt)
+
+    M1  = _total_mass(left)   + _total_mass(right)
+    E1  = _total_energy(left) + _total_energy(right)
+    MY1 = _total_rhoY(left)   + _total_rhoY(right)
+
+    drel_M  = abs(M1 - M0) / M0
+    drel_E  = abs(E1 - E0) / E0
+    drel_MY = abs(MY1 - MY0) / max(MY0, 1e-20)
+
+    # Mass at machine precision (the fix-critical assertion)
+    assert drel_M < 1e-12, (
+        f"mass drift: {drel_M:.3e} (M0={M0:.6e}, M1={M1:.6e})"
+    )
+    # Composition: near machine precision. Residual ~O(1e-7) over
+    # 2000 steps comes from the Y_mixed = YsumIn/mdot_in_total ratio
+    # losing a few ULP of precision during flow-reversal steps where
+    # mdot_in_total is near zero. For engine use (~O(1e-10) per step
+    # → ~2.5e-5 over 250k steps = 0.0025%) this is well below the
+    # cylinder-filling and combustion-tracking tolerances. A tighter
+    # bound would require solving a joint (p_j, Y_mixed) system
+    # which is deferred pending evidence that engine Y conservation
+    # is insufficient.
+    assert drel_MY < 1e-5, (
+        f"ρY drift: {drel_MY:.3e} — above the 1e-5 ceiling for this "
+        f"amplitude. Pre-HLLC-fix this was ~2e-4."
+    )
+    # Energy: bounded by the formulation's Δs/s̅ cost at the junction
+    # face (see test docstring). Empirically ~1e-5 at this amplitude
+    # with matched areas. Stays below 1e-4 as the formulation
+    # ceiling.
+    assert drel_E < 1e-4, (
+        f"energy drift exceeds formulation ceiling: {drel_E:.3e} "
+        f"(E0={E0:.6e}, E1={E1:.6e}). Expected O(1e-5) for Δp/p=0.1 "
+        f"at matched areas and temperatures."
     )

@@ -59,6 +59,14 @@ from typing import List, Tuple
 import numpy as np
 
 from solver.state import PipeState, I_RHO_A, I_MOM_A, I_E_A, I_Y_A
+from solver.hllc import hllc_flux
+
+
+def _minmod(a: float, b: float) -> float:
+    """Minmod limiter (same convention as solver/muscl.py:_minmod)."""
+    if a * b <= 0.0:
+        return 0.0
+    return a if abs(a) < abs(b) else b
 
 
 LEFT = "left"
@@ -109,20 +117,132 @@ class JunctionLeg:
 # Leg kinematics: interior state, face state given p_j, and per-leg mass flux
 # ---------------------------------------------------------------------------
 
-def _interior_primitives(leg: JunctionLeg) -> Tuple[float, float, float, float, float, float]:
-    """Read interior primitives (ρ, u, p, Y, c, A) at the first real cell
-    adjacent to the junction face."""
-    state = leg.state
+def _primitives_at(state: PipeState, cell_i: int) -> Tuple[float, float, float, float]:
+    """Read (ρ, u, p, ρY) at a single cell index. ρY form (not Y) matches
+    MUSCL's internal convention where the 4th reconstructed channel is
+    ρY, not the mass-fraction Y."""
     gm1 = state.gamma - 1.0
-    i = leg.face_cell_index
-    A = state.area[i]
-    rho = state.q[i, I_RHO_A] / A
-    u = state.q[i, I_MOM_A] / (rho * A)
-    E = state.q[i, I_E_A] / A
+    A = state.area[cell_i]
+    rho = state.q[cell_i, I_RHO_A] / A
+    u = state.q[cell_i, I_MOM_A] / (rho * A)
+    E = state.q[cell_i, I_E_A] / A
     p = max(gm1 * (E - 0.5 * rho * u * u), 1.0)
-    Y = state.q[i, I_Y_A] / (rho * A)
-    c = float(np.sqrt(state.gamma * p / max(rho, 1e-9)))
-    return rho, u, p, Y, c, A
+    rhoY = state.q[cell_i, I_Y_A] / A
+    return rho, u, p, rhoY
+
+
+def _interior_primitives(leg: JunctionLeg) -> Tuple[
+    float, float, float, float, float, float, float,
+    float, float, float, float,
+]:
+    """Read primitives at the first real cell adjacent to the junction
+    face, AND at the next-interior cell (needed for MUSCL slope
+    reconstruction). Returns:
+
+        (rho_i, u_i, p_i, Y_i, c_i, A_i, gamma,
+         rho_in, u_in, p_in, rhoY_in)
+
+    where subscript ``_i`` = junction-adjacent real cell and ``_in`` =
+    one cell deeper into the pipe interior. Per-leg γ is included so
+    the HLLC residual uses the same γ that the pipe boundary HLLC
+    call will use.
+    """
+    state = leg.state
+    gamma = state.gamma
+    gm1 = gamma - 1.0
+    i = leg.face_cell_index
+
+    A = state.area[i]
+    rho_i, u_i, p_i, rhoY_i = _primitives_at(state, i)
+    Y_i = rhoY_i / max(rho_i, 1e-20)
+    c_i = float(np.sqrt(gamma * p_i / max(rho_i, 1e-9)))
+
+    # Next-interior cell: at RIGHT end, that's i-1; at LEFT end, i+1.
+    i_in = i - 1 if leg.end == RIGHT else i + 1
+    rho_in, u_in, p_in, rhoY_in = _primitives_at(state, i_in)
+    return (
+        rho_i, u_i, p_i, Y_i, c_i, A, gamma,
+        rho_in, u_in, p_in, rhoY_in,
+    )
+
+
+def _muscl_face_reconstruction(
+    rho_i: float, u_i: float, p_i: float, rhoY_i: float,
+    rho_in: float, u_in: float, p_in: float, rhoY_in: float,
+    rho_g: float, u_g: float, p_g: float, rhoY_g: float,
+    gamma: float, dx: float, dt: float,
+    end: str,
+):
+    """Reproduce MUSCL-Hancock's face reconstruction on the interior
+    side of the junction face. The ghost side is unchanged (ghost
+    cells with uniform fill have zero slope and thus zero predictor
+    shift, so the ghost-side face value equals the raw ghost state).
+
+    Slope at the interior cell: minmod of backward and forward
+    primitive differences (NOT divided by dx — matching MUSCL's
+    internal convention where the "slope" is stored as a per-cell
+    difference and the 1/dx factor is applied in the predictor).
+
+    Predictor: evolve primitives by dt/2 using the primitive Euler
+    PDE (see solver/muscl.py step 3).
+
+    Face extrapolation: +0.5 · slope for RIGHT end (face is to the
+    right of the interior cell), −0.5 · slope for LEFT end.
+
+    Returns (rho_face, u_face, p_face, Y_face) — primitive state at
+    the face from the interior side, as MUSCL will compute it.
+    """
+    # Slope via minmod on raw differences.
+    if end == RIGHT:
+        # interior_inner is to the left, ghost is to the right
+        a_rho   = rho_i  - rho_in
+        a_u     = u_i    - u_in
+        a_p     = p_i    - p_in
+        a_rhoY  = rhoY_i - rhoY_in
+        b_rho   = rho_g  - rho_i
+        b_u     = u_g    - u_i
+        b_p     = p_g    - p_i
+        b_rhoY  = rhoY_g - rhoY_i
+        sign_half = +0.5
+    else:
+        # ghost is to the left, interior_inner is to the right
+        a_rho   = rho_i  - rho_g
+        a_u     = u_i    - u_g
+        a_p     = p_i    - p_g
+        a_rhoY  = rhoY_i - rhoY_g
+        b_rho   = rho_in - rho_i
+        b_u     = u_in   - u_i
+        b_p     = p_in   - p_i
+        b_rhoY  = rhoY_in - rhoY_i
+        sign_half = -0.5
+
+    srho  = _minmod(a_rho,  b_rho)
+    su    = _minmod(a_u,    b_u)
+    sp    = _minmod(a_p,    b_p)
+    srhoY = _minmod(a_rhoY, b_rhoY)
+
+    # Predictor: dt/2 time evolution (primitive form, matches
+    # solver/muscl.py step 3 verbatim).
+    half_dt_dx = 0.5 * dt / dx
+    drho  = -half_dt_dx * (u_i * srho + rho_i * su)
+    du    = -half_dt_dx * (u_i * su + sp / rho_i)
+    dp    = -half_dt_dx * (u_i * sp + gamma * p_i * su)
+    drhoY = -half_dt_dx * (u_i * srhoY + rhoY_i * su)
+
+    rho_f  = rho_i  + drho  + sign_half * srho
+    u_f    = u_i    + du    + sign_half * su
+    p_f    = p_i    + dp    + sign_half * sp
+    rhoY_f = rhoY_i + drhoY + sign_half * srhoY
+
+    # Positivity fallback (same policy as MUSCL)
+    if rho_f <= 0.0 or p_f <= 0.0:
+        rho_f = rho_i
+        u_f   = u_i
+        p_f   = p_i
+        rhoY_f = rhoY_i
+
+    Y_f = rhoY_f / max(rho_f, 1e-20)
+    return rho_f, u_f, p_f, Y_f
 
 
 def _face_from_pj(
@@ -157,34 +277,83 @@ def _face_from_pj(
     return rho_f, u_f, c_f, drhof_dpj, duf_dpj
 
 
-def _mass_residual_and_jacobian(
-    interiors: List[Tuple[float, float, float, float, float, float]],
+def _hllc_mass_residual(
     legs: List[JunctionLeg],
+    interiors: List[Tuple[float, float, float, float, float, float, float,
+                          float, float, float, float]],
     p_j: float,
-    gamma: float,
-) -> Tuple[float, float, List[Tuple[float, float, float]]]:
-    """Compute mass-balance residual R(p_j) = Σ σ_i ρ_f u_f A_i and its
-    analytic derivative dR/dp_j. Also returns per-leg (ρ_f, u_f, c_f)
-    tuples so the caller can re-use them for diagnostics and ghost fill.
+    references: List[Tuple[float, float, float, float]],
+    dt: float,
+) -> Tuple[float, List[Tuple[float, float, float, float]]]:
+    """HLLC-consistent mass residual, reproducing MUSCL-Hancock's
+    face reconstruction on the interior side so that the flux the
+    Newton balances matches *exactly* the flux the MUSCL step will
+    deliver at the boundary face.
 
-    The p_ref/c_ref passed into _face_from_pj uses the interior state for
-    every leg in this pass. For subsonic inflow legs, §2a of the design
-    doc calls for using junction-mixed entropy instead; that correction
-    is applied in a lagged-Picard outer pass by the caller.
+    This is the machine-precision-conservation fix: without the
+    MUSCL-aware reconstruction the residual is HLLC(raw interior,
+    ghost), but MUSCL actually evaluates HLLC(predicted+half-slope
+    interior, ghost). The mismatch is O(Δx) per step per leg and
+    accumulates as the conservation drift identified in the Phase-E
+    amplitude scan.
+
+    ``references`` supplies (ρ_ref, u_ref, p_ref, c_ref) for the
+    characteristic expansion, per leg. Usually equals the interior
+    state; for inflow legs with the Picard correction this is the
+    junction-mixed reservoir state.
+
+    Ghost cells are filled with the uniform face state (cell[0] =
+    cell[1] = face state), so the ghost-side slope is zero, predictor
+    is a no-op, and the ghost-side face value used in HLLC is simply
+    the face state (no reconstruction required).
+
+    Returns (R, face_states) where face_states[i] =
+    (ρ_ghost, u_ghost, p_ghost, F_mass_leg_i). ``ρ_ghost etc.`` are
+    the values written into the ghost cells; the interior-side MUSCL
+    reconstruction is used internally for HLLC but not returned.
     """
     R = 0.0
-    dR_dpj = 0.0
-    face_states: List[Tuple[float, float, float]] = []
-    for leg, (rho_i, u_i, p_i, Y_i, c_i, A_i) in zip(legs, interiors):
-        rho_f, u_f, c_f, drhof, duf = _face_from_pj(
-            rho_i, u_i, p_i, c_i, p_j, gamma, leg.s_end,
+    face_states: List[Tuple[float, float, float, float]] = []
+    for leg, interior, ref in zip(legs, interiors, references):
+        (rho_i, u_i, p_i, Y_i, c_i, A_i, gamma_leg,
+         rho_in, u_in, p_in, rhoY_in) = interior
+        rho_ref, u_ref, p_ref, c_ref = ref
+        # Characteristic face state (goes into ghost cells)
+        rho_g, u_g, c_g, _, _ = _face_from_pj(
+            rho_ref, u_ref, p_ref, c_ref, p_j, gamma_leg, leg.s_end,
         )
-        sigma = leg.sign_into
-        R      += sigma * rho_f * u_f * A_i
-        # product rule: d(ρ_f·u_f)/dp_j = drhof·u_f + rho_f·duf
-        dR_dpj += sigma * (drhof * u_f + rho_f * duf) * A_i
-        face_states.append((rho_f, u_f, c_f))
-    return R, dR_dpj, face_states
+        p_g = rho_g * c_g * c_g / gamma_leg
+        Y_g = Y_i   # will be overwritten by mixed-Y for inflow legs later
+        rhoY_g = rho_g * Y_g
+
+        # Interior-side MUSCL reconstruction: match what the pipe
+        # will do when its MUSCL step runs.
+        rhoY_i = rho_i * Y_i
+        rho_fI, u_fI, p_fI, Y_fI = _muscl_face_reconstruction(
+            rho_i, u_i, p_i, rhoY_i,
+            rho_in, u_in, p_in, rhoY_in,
+            rho_g, u_g, p_g, rhoY_g,
+            gamma_leg, leg.state.dx, dt, leg.end,
+        )
+
+        # Ghost-side face value = ghost cell state (slope 0, predictor no-op)
+        rho_fG, u_fG, p_fG, Y_fG = rho_g, u_g, p_g, Y_g
+
+        # HLLC flux at the boundary face.
+        if leg.end == RIGHT:
+            # Interior is LEFT of face, ghost is RIGHT
+            F = hllc_flux(rho_fI, u_fI, p_fI, Y_fI,
+                          rho_fG, u_fG, p_fG, Y_fG,
+                          gamma_leg)
+        else:
+            # Ghost is LEFT of face, interior is RIGHT
+            F = hllc_flux(rho_fG, u_fG, p_fG, Y_fG,
+                          rho_fI, u_fI, p_fI, Y_fI,
+                          gamma_leg)
+        F_mass = F[0]
+        R += leg.sign_into * F_mass * A_i
+        face_states.append((rho_g, u_g, p_g, F_mass))
+    return R, face_states
 
 
 # ---------------------------------------------------------------------------
@@ -218,10 +387,15 @@ class CharacteristicJunction:
     legs: List[JunctionLeg]
     gamma: float = 1.4
     R_gas: float = 287.0
-    newton_tol: float = 1e-9        # absolute mass-residual tolerance [kg/s]
+    newton_tol: float = 1e-13       # absolute mass-residual tolerance [kg/s]
     newton_max_iter: int = 30
     choke_margin: float = 0.02      # |M| < 1 − margin counts as subsonic
-    inflow_entropy_picard: bool = True   # one extra pass with mixed-entropy
+
+    # Internal-only: inflow-entropy Picard correction. On by default.
+    # NOT in the constructor signature to prevent it being used as a
+    # result-tuning lever (the junction is more correct with it on,
+    # and the small transmission cost is the price of correctness).
+    _inflow_entropy_picard: bool = field(default=True, repr=False)
 
     # diagnostics (written each fill_ghosts call)
     last_p_junction: float = 101325.0
@@ -233,10 +407,21 @@ class CharacteristicJunction:
 
     # --- lifecycle ------------------------------------------------------
 
-    def fill_ghosts(self) -> None:
+    def fill_ghosts(self, dt: float) -> None:
+        """Solve Newton on junction pressure and write ghost cells.
+
+        ``dt`` is the time step about to be taken by the MUSCL-Hancock
+        step for the adjacent pipes. It is required because the
+        characteristic-junction Newton residual uses MUSCL-Hancock's
+        face reconstruction (predictor + half-slope extrapolation)
+        to match the flux the pipe will actually deliver at the
+        boundary. Passing an incorrect dt reintroduces a conservation
+        drift of O(Δdt · flow amplitude). Compute dt from the pipe
+        interiors (cfl_dt works without valid ghosts) BEFORE calling
+        this method.
+        """
         if len(self.legs) < 2:
             return
-        gamma = self.gamma
 
         interiors = [_interior_primitives(L) for L in self.legs]
 
@@ -245,47 +430,59 @@ class CharacteristicJunction:
         sum_A  = sum(it[5] for it in interiors)
         p_j = sum_pA / sum_A
 
-        # --- Newton iteration on mass balance --------------------------
-        p_j, niter, face_states, converged = self._newton_mass_balance(
-            interiors, p_j, gamma,
+        # References for the characteristic expansion, starts as interior
+        # state for every leg. May be overridden per-leg by the
+        # inflow-entropy Picard pass below.
+        references = [(it[0], it[1], it[2], it[4]) for it in interiors]
+
+        # --- Secant iteration on HLLC-consistent mass balance ----------
+        p_j, niter, face_states, converged = self._secant_mass_balance(
+            interiors, references, p_j, dt,
         )
         if not converged:
             raise JunctionConvergenceError(
                 f"CharacteristicJunction did not converge in "
-                f"{self.newton_max_iter} Newton steps. "
+                f"{self.newton_max_iter} secant steps. "
                 f"last p_j = {p_j:.1f} Pa, last |R| = {self.last_mass_residual:.3e} kg/s. "
-                f"Leg interiors: "
-                f"{[(rho, u, p) for rho, u, p, _, _, _ in interiors]}"
+                f"Leg interiors (ρ, u, p): "
+                f"{[(it[0], it[1], it[2]) for it in interiors]}"
             )
 
         # --- Regime check: any choked legs? ----------------------------
-        choked_legs = self._detect_choked_legs(face_states)
+        # face_states entries are (rho_f, u_f, p_f, F_mass). Map to
+        # (rho_f, u_f, c_f) for the existing choke classifier.
+        face_states_ruc = [
+            (rho_f, u_f, float(np.sqrt(it[6] * p_f / max(rho_f, 1e-9))))
+            for (rho_f, u_f, p_f, _F), it in zip(face_states, interiors)
+        ]
+        choked_legs = self._detect_choked_legs(face_states_ruc)
         if choked_legs:
             p_j, niter_c, face_states = self._solve_with_choked(
-                interiors, choked_legs, gamma,
+                interiors, references, choked_legs, dt,
             )
             niter += niter_c
             self.last_regime = f"choked_{len(choked_legs)}"
         else:
             self.last_regime = "subsonic"
 
-        # --- Optional: inflow entropy correction (Picard one pass) -----
-        # If any leg is an inflow (ρ_f u_f σ < 0, i.e. flow from junction
-        # into leg), its face state should use the junction-mixed
-        # entropy, not its own interior entropy. Relax once and accept.
-        if self.inflow_entropy_picard and not choked_legs:
-            p_j_corr, face_states_corr = self._inflow_entropy_pass(
-                interiors, face_states, p_j, gamma,
+        # --- Inflow entropy correction (Picard one pass) ---------------
+        # Internal knob _inflow_entropy_picard is True by default; not
+        # surfaced in the constructor signature to prevent it being
+        # used as a result-tuning lever.
+        if self._inflow_entropy_picard and not choked_legs:
+            p_j_corr, face_states_corr, references_corr = self._inflow_entropy_pass(
+                interiors, face_states, references, p_j, dt,
             )
             if p_j_corr is not None:
                 p_j = p_j_corr
                 face_states = face_states_corr
+                references = references_corr
 
-        # --- Composition mixing ---------------------------------------
+        # --- Composition mixing ----------------------------------------
         Y_mixed = self._compute_mixed_Y(interiors, face_states)
         self.last_y_mixed = Y_mixed
 
-        # --- Energy residual (diagnostic, signed) ---------------------
+        # --- Energy residual (diagnostic, signed) ----------------------
         self.last_energy_residual = self._energy_residual(
             interiors, face_states,
         )
@@ -302,60 +499,76 @@ class CharacteristicJunction:
         fluxes directly. Method kept for API symmetry with JunctionCV."""
         _ = dt
 
-    # --- Newton mass balance -------------------------------------------
+    # --- Secant mass balance (HLLC-consistent) -------------------------
 
-    def _newton_mass_balance(self, interiors, p_j, gamma):
+    def _secant_mass_balance(self, interiors, references, p_j, dt):
+        """Secant iteration on p_j with the HLLC-based residual. Secant
+        instead of Newton because dR/dp_j under HLLC has internal
+        branches (S_L/S_R/S* sign changes) that make an analytic
+        Jacobian fragile; secant uses two residual evaluations per
+        step and is robust under branches.
+        """
         p_floor = 1000.0
-        R_abs_best = float("inf")
+        dp_fd = 1.0   # 1 Pa perturbation for initial finite difference
+
+        # Prime with two residual evaluations at p_j and p_j + 1 Pa.
+        R0, fs0 = _hllc_mass_residual(self.legs, interiors, p_j, references, dt)
+        self.last_mass_residual = R0
+        if abs(R0) < self.newton_tol:
+            return p_j, 1, fs0, True
+
+        p_prev = p_j
+        R_prev = R0
+        p_curr = p_j + dp_fd
+        R_curr, fs_curr = _hllc_mass_residual(
+            self.legs, interiors, p_curr, references, dt,
+        )
+
         for it in range(self.newton_max_iter):
-            R, dR_dpj, face_states = _mass_residual_and_jacobian(
-                interiors, self.legs, p_j, gamma,
-            )
-            self.last_mass_residual = R
-            if abs(R) < self.newton_tol:
-                return p_j, it + 1, face_states, True
-            if abs(dR_dpj) < 1e-30:
-                # Singular Jacobian — usually means all legs near-choked.
-                # Let the caller decide; return what we have as not-converged.
-                return p_j, it + 1, face_states, False
-            dp = -R / dR_dpj
-            # 20% damping cap
-            cap = 0.2 * p_j
+            self.last_mass_residual = R_curr
+            if abs(R_curr) < self.newton_tol:
+                return p_curr, it + 2, fs_curr, True
+            denom = R_curr - R_prev
+            if abs(denom) < 1e-30:
+                return p_curr, it + 2, fs_curr, False
+            slope = denom / (p_curr - p_prev)
+            dp = -R_curr / slope
+            cap = 0.2 * p_curr
             if dp > cap:
                 dp = cap
             elif dp < -cap:
                 dp = -cap
-            p_j = max(p_j + dp, p_floor)
-            R_abs_best = min(R_abs_best, abs(R))
-        # max_iter hit: one last residual evaluation so the diagnostic
-        # is up to date, then fail.
-        R, _, face_states = _mass_residual_and_jacobian(
-            interiors, self.legs, p_j, gamma,
-        )
-        self.last_mass_residual = R
-        return p_j, self.newton_max_iter, face_states, False
+            p_next = max(p_curr + dp, p_floor)
+            R_next, fs_next = _hllc_mass_residual(
+                self.legs, interiors, p_next, references, dt,
+            )
+            p_prev, R_prev = p_curr, R_curr
+            p_curr, R_curr, fs_curr = p_next, R_next, fs_next
+
+        self.last_mass_residual = R_curr
+        return p_curr, self.newton_max_iter + 1, fs_curr, False
 
     # --- Choked-leg dispatch -------------------------------------------
 
-    def _detect_choked_legs(self, face_states):
+    def _detect_choked_legs(self, face_states_ruc):
         """Return indices of legs whose converged face state is at or
-        above Mach (1 − choke_margin) with flow INTO the junction. We
-        only check "into" because inflow legs at M=1 are numerically
-        similar to outflow-into-junction at M=1; a leg whose upstream
-        side is the junction would need a separate choked-inflow
-        treatment (not currently needed in the SDM26 use case)."""
+        above Mach (1 − choke_margin) with flow INTO the junction.
+
+        ``face_states_ruc`` is a list of (rho_f, u_f, c_f) tuples
+        (the "ruc" = rho,u,c form; separate from the 4-tuple used
+        by the HLLC residual path)."""
         choked = []
-        for i, (L, (rho_f, u_f, c_f)) in enumerate(zip(self.legs, face_states)):
-            sigma = L.sign_into
-            M_into = sigma * u_f / max(c_f, 1.0)
+        for i, (L, (rho_f, u_f, c_f)) in enumerate(zip(self.legs, face_states_ruc)):
+            M_into = L.sign_into * u_f / max(c_f, 1.0)
             if M_into > 1.0 - self.choke_margin:
                 choked.append(i)
         return choked
 
-    def _solve_with_choked(self, interiors, choked_indices, gamma):
-        """Reduced solve: each choked leg contributes a fixed mass flux
-        (sonic throat) independent of p_j. Newton iterates p_j only
-        over the non-choked legs."""
+    def _solve_with_choked(self, interiors, references, choked_indices, dt):
+        """Reduced HLLC-consistent solve: choked legs contribute a
+        fixed sonic mass flux; secant iterates p_j across the
+        subsonic legs so the HLLC mass flux sum (choked + subsonic)
+        balances to zero."""
         choked_set = set(choked_indices)
         if len(choked_set) == len(self.legs):
             raise JunctionAllChokedError(
@@ -365,187 +578,213 @@ class CharacteristicJunction:
             )
 
         # Sonic throat mass flux for each choked leg, using the leg's
-        # interior stagnation state as reservoir.
+        # interior stagnation state as reservoir. The sonic flux is a
+        # *physical* flux (not HLLC-consistent), but the choked ghost
+        # state written later feeds HLLC; HLLC on (interior, sonic
+        # ghost) will deliver ≈ the sonic mass flux up to reconstruction
+        # error, and the residual below treats the choked legs as
+        # exactly sonic to close the system.
         fixed_mdot = []
-        gp1 = gamma + 1.0
-        gm1 = gamma - 1.0
-        choke_exp = -0.5 * gp1 / gm1
         for idx in choked_indices:
-            rho_i, u_i, p_i, _Y, c_i, A_i = interiors[idx]
-            # Stagnation density/sound-speed from isentropic rel: ρ0 = ρ·(1+(γ−1)/2·M²)^(1/(γ−1))
+            it = interiors[idx]
+            rho_i, u_i, p_i, _Y = it[0], it[1], it[2], it[3]
+            c_i, A_i, gamma_leg = it[4], it[5], it[6]
+            gp1 = gamma_leg + 1.0
+            gm1 = gamma_leg - 1.0
+            choke_exp = -0.5 * gp1 / gm1
             M_i = u_i / max(c_i, 1.0)
             t0_factor = 1.0 + 0.5 * gm1 * M_i * M_i
             rho0 = rho_i * t0_factor ** (1.0 / gm1)
             c0 = c_i * np.sqrt(t0_factor)
-            # ṁ* = ρ0·c0·A·(2/(γ+1))^((γ+1)/(2(γ−1))) · something — use
-            # the compact form  ṁ* = ρ0·c0·A·((γ+1)/2)^(-(γ+1)/(2(γ−1)))
             mdot_star = rho0 * c0 * A_i * (gp1 / 2.0) ** choke_exp
             sigma = self.legs[idx].sign_into
             fixed_mdot.append((idx, sigma * mdot_star))
-
         fixed_mdot_sum = sum(v for _, v in fixed_mdot)
 
-        # Newton on non-choked legs, residual = Σ_non σ ρ_f u_f A + fixed_mdot_sum
-        p_floor = 1000.0
+        # Restrict residual to non-choked legs (MUSCL-aware, matches
+        # the main subsonic residual's reconstruction behavior).
+        def residual(p_j):
+            face_states_all = [None] * len(self.legs)  # type: ignore
+            R = fixed_mdot_sum
+            # Build a legs-slice + interiors-slice for just the non-choked
+            # legs and call the main residual machinery on it.
+            sub_legs = []
+            sub_interiors = []
+            sub_refs = []
+            sub_indices = []
+            for i, (leg, it, ref) in enumerate(
+                zip(self.legs, interiors, references)
+            ):
+                if i in choked_set:
+                    continue
+                sub_legs.append(leg)
+                sub_interiors.append(it)
+                sub_refs.append(ref)
+                sub_indices.append(i)
+            R_sub, fs_sub = _hllc_mass_residual(
+                sub_legs, sub_interiors, p_j, sub_refs, dt,
+            )
+            R += R_sub
+            for sub_idx, full_idx in enumerate(sub_indices):
+                face_states_all[full_idx] = fs_sub[sub_idx]
+            return R, face_states_all
+
         # Initial guess: area-weighted mean over non-choked legs
         sum_pA = 0.0
         sum_A = 0.0
-        for i, (_, _, p_i, _, _, A_i) in enumerate(interiors):
+        for i, it in enumerate(interiors):
             if i in choked_set:
                 continue
-            sum_pA += p_i * A_i
-            sum_A += A_i
+            sum_pA += it[2] * it[5]   # p_i * A_i
+            sum_A  += it[5]
         p_j = sum_pA / max(sum_A, 1e-9)
 
+        # Secant
+        p_floor = 1000.0
+        dp_fd = 1.0
+        R_prev, fs_prev = residual(p_j)
+        if abs(R_prev) < self.newton_tol:
+            self._fill_choked_face_states(interiors, choked_indices, fs_prev)
+            self.last_mass_residual = R_prev
+            return p_j, 1, fs_prev
+        p_prev = p_j
+        p_curr = p_j + dp_fd
+        R_curr, fs_curr = residual(p_curr)
         for it in range(self.newton_max_iter):
-            R_nonchoked = 0.0
-            dR = 0.0
-            face_states_all: List[Tuple[float, float, float]] = [None] * len(self.legs)  # type: ignore
-            for i, (L, (rho_i, u_i, p_i, _Y, c_i, A_i)) in enumerate(zip(self.legs, interiors)):
-                if i in choked_set:
-                    continue
-                rho_f, u_f, c_f, drhof, duf = _face_from_pj(
-                    rho_i, u_i, p_i, c_i, p_j, gamma, L.s_end,
-                )
-                sigma = L.sign_into
-                R_nonchoked += sigma * rho_f * u_f * A_i
-                dR += sigma * (drhof * u_f + rho_f * duf) * A_i
-                face_states_all[i] = (rho_f, u_f, c_f)
-            R = R_nonchoked + fixed_mdot_sum
-            if abs(R) < self.newton_tol:
-                # Fill choked-leg face states for ghost write
-                self._fill_choked_face_states(
-                    interiors, choked_indices, face_states_all, gamma,
-                )
-                self.last_mass_residual = R
-                return p_j, it + 1, face_states_all
-            if abs(dR) < 1e-30:
+            if abs(R_curr) < self.newton_tol:
+                self._fill_choked_face_states(interiors, choked_indices, fs_curr)
+                self.last_mass_residual = R_curr
+                return p_curr, it + 2, fs_curr
+            denom = R_curr - R_prev
+            if abs(denom) < 1e-30:
                 break
-            dp = -R / dR
-            cap = 0.2 * p_j
+            slope = denom / (p_curr - p_prev)
+            dp = -R_curr / slope
+            cap = 0.2 * p_curr
             if dp > cap:
                 dp = cap
             elif dp < -cap:
                 dp = -cap
-            p_j = max(p_j + dp, p_floor)
+            p_next = max(p_curr + dp, p_floor)
+            R_next, fs_next = residual(p_next)
+            p_prev, R_prev = p_curr, R_curr
+            p_curr, R_curr, fs_curr = p_next, R_next, fs_next
 
         raise JunctionConvergenceError(
             f"CharacteristicJunction choked branch did not converge "
             f"({len(choked_indices)} legs choked, "
             f"{len(self.legs) - len(choked_indices)} subsonic). "
-            f"last p_j = {p_j:.1f} Pa."
+            f"last p_j = {p_curr:.1f} Pa, |R| = {abs(R_curr):.3e}"
         )
 
     def _fill_choked_face_states(
-        self, interiors, choked_indices, face_states_all, gamma,
+        self, interiors, choked_indices, face_states_all,
     ):
         """Populate face_states_all entries for choked legs with their
-        sonic throat state (ρ*, u*, c*)."""
-        gm1 = gamma - 1.0
+        sonic-throat state, packaged as (rho_f, u_f, p_f, F_mass) to
+        match the subsonic face-state tuple shape."""
         for idx in choked_indices:
             L = self.legs[idx]
-            rho_i, u_i, p_i, _Y, c_i, A_i = interiors[idx]
+            it = interiors[idx]
+            rho_i, u_i, p_i = it[0], it[1], it[2]
+            c_i, A_i, gamma_leg = it[4], it[5], it[6]
+            gm1 = gamma_leg - 1.0
             M_i = u_i / max(c_i, 1.0)
             t0_factor = 1.0 + 0.5 * gm1 * M_i * M_i
-            T0_over_T = t0_factor  # T0/T at interior
             rho0 = rho_i * t0_factor ** (1.0 / gm1)
             c0 = c_i * np.sqrt(t0_factor)
-            # Sonic throat: T*/T0 = 2/(γ+1), ρ*/ρ0 = (2/(γ+1))^(1/(γ−1))
-            t_star_over_t0 = 2.0 / (gamma + 1.0)
+            t_star_over_t0 = 2.0 / (gamma_leg + 1.0)
             rho_star = rho0 * t_star_over_t0 ** (1.0 / gm1)
             c_star = c0 * np.sqrt(t_star_over_t0)
-            u_star = L.sign_into * c_star  # sonic, direction = into junction
-            face_states_all[idx] = (rho_star, u_star, c_star)
+            u_star = L.sign_into * c_star
+            p_star = rho_star * c_star * c_star / gamma_leg
+            F_mass_star = L.sign_into * rho_star * abs(c_star) * A_i  # throat mass flux
+            face_states_all[idx] = (rho_star, u_star, p_star, F_mass_star)
 
     # --- Inflow entropy Picard pass ------------------------------------
 
     def _inflow_entropy_pass(
-        self, interiors, face_states, p_j_current, gamma,
+        self, interiors, face_states, references, p_j_current, dt,
     ):
         """One-pass Picard correction: for legs carrying mass out of the
         junction (into the pipe), re-evaluate the face state using the
-        junction-mixed entropy rather than the leg's interior entropy,
-        then re-solve Newton for p_j.
+        junction-mixed entropy as the reference state rather than the
+        leg's own interior entropy, then re-solve secant for p_j.
 
-        Returns (new_p_j, new_face_states) if a correction was applied,
-        else (None, None)."""
-        # Identify inflow legs (from junction into pipe)
+        face_states entries: (rho_f, u_f, p_f, F_mass).
+
+        Returns (new_p_j, new_face_states, new_references) if applied,
+        else (None, None, None)."""
         inflow_legs = []
         outflow_legs = []
-        for i, (L, (rho_f, u_f, c_f)) in enumerate(zip(self.legs, face_states)):
-            sigma = L.sign_into
-            if sigma * u_f < 0.0:
+        for i, (L, fs) in enumerate(zip(self.legs, face_states)):
+            _rho_f, _u_f, _p_f, F_mass = fs
+            if L.sign_into * F_mass < 0.0:
                 inflow_legs.append(i)
             else:
                 outflow_legs.append(i)
 
         if not inflow_legs or not outflow_legs:
-            # All one-way: no mixing correction to apply.
-            return None, None
+            return None, None, None
 
-        # Mass-weighted (rho, p) of outflow legs defines the junction
-        # reservoir state. Entropy is p/ρ^γ.
+        # Mass-weighted ρ, p across outflow legs = junction reservoir.
+        # Use HLLC-consistent F_mass (not analytic ρ_f·u_f) so the
+        # reservoir state matches what MUSCL will actually deliver.
         mdot_out_total = 0.0
         rho_mix = 0.0
         p_mix = 0.0
         for i in outflow_legs:
             L = self.legs[i]
-            rho_f, u_f, c_f = face_states[i]
+            rho_f, _u_f, _p_f, F_mass = face_states[i]
             A_i = interiors[i][5]
-            mdot = L.sign_into * rho_f * u_f * A_i
+            mdot = L.sign_into * F_mass * A_i
             mdot_out_total += mdot
             rho_mix += mdot * rho_f
-            p_mix += mdot * interiors[i][2]  # interior p
+            p_mix   += mdot * interiors[i][2]   # interior p
         if mdot_out_total <= 0.0:
-            return None, None
+            return None, None, None
         rho_mix /= mdot_out_total
         p_mix   /= mdot_out_total
-        # Use p_mix at the current p_j as the "reservoir" state; entropy
-        # s_mix = p_mix / rho_mix^γ. For the inflow leg face state:
-        #   c_mix = sqrt(γ p_mix / rho_mix)
-        c_mix = float(np.sqrt(gamma * p_mix / max(rho_mix, 1e-9)))
 
-        # Build a corrected "interiors" list: for inflow legs, swap in
-        # the mixed reference state; outflow legs keep their own
-        # interior. Velocity reference for the characteristic is the
-        # leg's interior u (the characteristic is still carried from
-        # the interior along the outgoing direction).
-        corrected = list(interiors)
+        # Build corrected references. For inflow legs, use (rho_mix,
+        # u_interior, p_mix, c_mix) — interior u is still the velocity
+        # reference along the outgoing characteristic, the rest comes
+        # from the junction reservoir. For outflow legs, keep their
+        # original interior reference.
+        new_refs = list(references)
         for i in inflow_legs:
-            rho_i, u_i, p_i, Y_i, c_i, A_i = interiors[i]
-            corrected[i] = (rho_mix, u_i, p_mix, Y_i, c_mix, A_i)
+            # interiors[i] shape: (rho, u, p, Y, c, A, gamma, rho_in, u_in, p_in, rhoY_in)
+            u_i = interiors[i][1]
+            gamma_leg = interiors[i][6]
+            c_mix = float(np.sqrt(gamma_leg * p_mix / max(rho_mix, 1e-9)))
+            new_refs[i] = (rho_mix, u_i, p_mix, c_mix)
 
-        # Re-run Newton from the current p_j with the corrected
-        # references.
-        p_j = p_j_current
-        for it in range(self.newton_max_iter):
-            R, dR, face_states_new = _mass_residual_and_jacobian(
-                corrected, self.legs, p_j, gamma,
-            )
-            if abs(R) < self.newton_tol:
-                self.last_mass_residual = R
-                return p_j, face_states_new
-            if abs(dR) < 1e-30:
-                break
-            dp = -R / dR
-            cap = 0.2 * p_j
-            if dp > cap:
-                dp = cap
-            elif dp < -cap:
-                dp = -cap
-            p_j = max(p_j + dp, 1000.0)
-        # Picard pass did not converge — keep the original face states.
-        return None, None
+        # Re-run secant from current p_j with corrected references.
+        p_j, niter, fs_new, converged = self._secant_mass_balance(
+            interiors, new_refs, p_j_current, dt,
+        )
+        if converged:
+            return p_j, fs_new, new_refs
+        # Picard didn't converge — drop the correction.
+        return None, None, None
 
     # --- Composition mixing --------------------------------------------
 
     def _compute_mixed_Y(self, interiors, face_states):
+        """Mass-weighted Y of legs delivering mass INTO the junction.
+
+        Uses the HLLC-consistent mass flux from face_states[i][3] (what
+        MUSCL will actually deliver at the boundary face), not the
+        analytic ρ_f·u_f·A product — those two quantities differ
+        slightly, and using the analytic version here leaks species
+        mass (ρY non-conservation) at machine scale."""
         mdot_in_total = 0.0
         YsumIn = 0.0
-        for L, (rho_f, u_f, _), it in zip(self.legs, face_states, interiors):
-            A_i = it[5]
+        for L, fs, it in zip(self.legs, face_states, interiors):
+            _rho_f, _u_f, _p_f, F_mass = fs
             Y_i = it[3]
-            signed_into_j = L.sign_into * rho_f * u_f * A_i
+            A_i = it[5]
+            signed_into_j = L.sign_into * F_mass * A_i
             if signed_into_j > 0.0:
                 mdot_in_total += signed_into_j
                 YsumIn += signed_into_j * Y_i
@@ -561,13 +800,15 @@ class CharacteristicJunction:
         Positive residual = junction gaining energy (physically impossible,
         flags numerical bug). Negative of small magnitude = lossy mixing
         across area change, expected and correct for mismatched junctions."""
-        gamma = self.gamma
-        gm1 = gamma - 1.0
-        # For ρ_f, u_f, c_f: h = c^2/(γ−1). h0 = h + ½u².
         E_flux = 0.0
-        for L, (rho_f, u_f, c_f), it in zip(self.legs, face_states, interiors):
+        for L, fs, it in zip(self.legs, face_states, interiors):
+            rho_f, u_f, p_f, _F = fs
             A_i = it[5]
-            h = c_f * c_f / gm1
+            gamma_leg = it[6]
+            gm1 = gamma_leg - 1.0
+            # h from face state: h = c²/(γ−1) where c² = γ·p/ρ
+            c_f_sq = gamma_leg * p_f / max(rho_f, 1e-9)
+            h = c_f_sq / gm1
             h0 = h + 0.5 * u_f * u_f
             E_flux += L.sign_into * rho_f * u_f * A_i * h0
         return E_flux
@@ -575,21 +816,15 @@ class CharacteristicJunction:
     # --- Ghost write ---------------------------------------------------
 
     def _write_ghosts(self, interiors, face_states, Y_mixed, p_j):
-        gamma = self.gamma
-        gm1 = gamma - 1.0
-        for leg, it, face in zip(self.legs, interiors, face_states):
-            rho_i, u_i, p_i, Y_i, c_i, A_i = it
-            rho_f, u_f, c_f = face
-            # Y upstream-upwind: if this leg is pushing flow INTO the
-            # junction, its own composition moves into the junction.
-            # If this leg is pulling flow OUT of the junction, it
-            # receives the mixed composition.
-            signed_into = leg.sign_into * rho_f * u_f
-            Y_ghost = Y_i if signed_into >= 0.0 else Y_mixed
-            # Ghost static pressure = p_j (subsonic) or sonic-throat p
-            # (choked). For subsonic legs p_f = p_j identically. For
-            # choked legs we need p from face state: p_f = ρ_f c_f^2 / γ.
-            p_f = rho_f * c_f * c_f / gamma
+        for leg, it, fs in zip(self.legs, interiors, face_states):
+            Y_i = it[3]
+            gamma_leg = it[6]
+            rho_f, u_f, p_f, F_mass = fs
+            gm1 = gamma_leg - 1.0
+            # Y upstream-upwind: use HLLC-consistent sign to match what
+            # MUSCL's HLLC will do when upwinding species at the face.
+            signed_into_hllc = leg.sign_into * F_mass
+            Y_ghost = Y_i if signed_into_hllc >= 0.0 else Y_mixed
             E_ghost_density = p_f / gm1 + 0.5 * rho_f * u_f * u_f
             state = leg.state
             ng = state.n_ghost
