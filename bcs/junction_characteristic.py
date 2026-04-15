@@ -277,6 +277,183 @@ def _face_from_pj(
     return rho_f, u_f, c_f, drhof_dpj, duf_dpj
 
 
+# ---------------------------------------------------------------------------
+# Phase F1 — Corberán loss-coefficient inner solve (per leg)
+# ---------------------------------------------------------------------------
+
+def _solve_inner_u_face(
+    leg: JunctionLeg,
+    interior: Tuple[float, float, float, float, float, float, float,
+                    float, float, float, float],
+    reference: Tuple[float, float, float, float],
+    p0_junction: float,
+    K_in: float,
+    K_out: float,
+    tol: float = 1e-10,
+    max_iter: int = 40,
+) -> Tuple[float, float, float, float, bool, int]:
+    """Per-leg inner secant solve for u_face, given the junction
+    stagnation pressure p0_junction and the leg's K coefficients.
+
+    Iterates on u_face such that the Corberán loss relation is satisfied:
+        p_0,face = p_face + ½ρ_face·u_face²
+        p_0,face = p_0,junction + sign(σ·u_face) · K_eff · ½ρ_face·u_face²
+
+    with K_eff = K_in if σ·u_face > 0 (inflow into junction), else K_out.
+
+    Returns (rho_f, u_f, p_f, c_f, converged, niter).
+    """
+    rho_i, u_i, p_i, Y_i, c_i, A_i, gamma_leg, _, _, _, _ = interior
+    rho_ref, u_ref, p_ref, c_ref = reference
+    gm1 = gamma_leg - 1.0
+    s_end = leg.s_end
+    sigma = leg.sign_into
+
+    def face_from_u(u_face):
+        """Compute (ρ_f, p_f, c_f) from u_face via the characteristic
+        invariant eq (3a) inverted for c_face, then isentropic from ref."""
+        # eq (3a) solved for c_face: u_face = u_ref + (2/gm1)·(c_ref - c_f)·s_end
+        c_face = c_ref - 0.5 * gm1 * s_end * (u_face - u_ref)
+        if c_face <= 0.0:
+            return None
+        # Isentropic from reference: p_face/p_ref = (c_face/c_ref)^(2γ/gm1)
+        p_face = p_ref * (c_face / c_ref) ** (2.0 * gamma_leg / gm1)
+        # ρ from ideal gas: ρ = γp / c²
+        rho_face = gamma_leg * p_face / (c_face * c_face)
+        return rho_face, p_face, c_face
+
+    def residual(u_face):
+        fs = face_from_u(u_face)
+        if fs is None:
+            return None
+        rho_f, p_f, c_f = fs
+        dyn_head = 0.5 * rho_f * u_face * u_face
+        p0_face = p_f + dyn_head
+        # Direction at the face: inflow = flow into junction = σ·u > 0
+        K_eff = K_in if sigma * u_face > 0.0 else K_out
+        direction_sign = 1.0 if sigma * u_face > 0.0 else -1.0
+        p0_face_expected = p0_junction + direction_sign * K_eff * dyn_head
+        return p0_face - p0_face_expected
+
+    # Initial guess: u_face = interior u, perturbed by +1 m/s for secant prime
+    u0 = u_i
+    R0 = residual(u0)
+    if R0 is None or abs(R0) < tol:
+        if R0 is None:
+            return rho_i, u_i, p_i, c_i, False, 0
+        fs = face_from_u(u0)
+        return fs[0], u0, fs[1], fs[2], True, 1
+
+    u1 = u_i + 1.0
+    R1 = residual(u1)
+    if R1 is None:
+        # Back off, try the other direction
+        u1 = u_i - 1.0
+        R1 = residual(u1)
+        if R1 is None:
+            return rho_i, u_i, p_i, c_i, False, 1
+
+    for it in range(max_iter):
+        if abs(R1) < tol:
+            fs = face_from_u(u1)
+            return fs[0], u1, fs[1], fs[2], True, it + 2
+        denom = R1 - R0
+        if abs(denom) < 1e-30:
+            fs = face_from_u(u1)
+            return fs[0], u1, fs[1], fs[2], False, it + 2
+        slope = denom / (u1 - u0)
+        du = -R1 / slope
+        # Damp steps to prevent overshoot past the sonic limit
+        cap = 0.5 * abs(c_i)
+        if du > cap:
+            du = cap
+        elif du < -cap:
+            du = -cap
+        u_next = u1 + du
+        R_next = residual(u_next)
+        if R_next is None:
+            # Reduce step size and retry
+            du *= 0.5
+            u_next = u1 + du
+            R_next = residual(u_next)
+            if R_next is None:
+                fs_fall = face_from_u(u1)
+                return fs_fall[0], u1, fs_fall[1], fs_fall[2], False, it + 2
+        u0, R0 = u1, R1
+        u1, R1 = u_next, R_next
+
+    fs = face_from_u(u1)
+    if fs is None:
+        return rho_i, u_i, p_i, c_i, False, max_iter + 2
+    return fs[0], u1, fs[1], fs[2], abs(R1) < tol, max_iter + 2
+
+
+def _corberan_mass_residual(
+    legs: List[JunctionLeg],
+    interiors: List[Tuple[float, float, float, float, float, float, float,
+                          float, float, float, float]],
+    p0_junction: float,
+    references: List[Tuple[float, float, float, float]],
+    dt: float,
+    K_incoming: List[float],
+    K_outgoing: List[float],
+) -> Tuple[float, List[Tuple[float, float, float, float]], int, float]:
+    """Corberán mass residual: for each leg, inner-solve for u_face given
+    p_0_junction and the leg's K coefficients; then evaluate the
+    HLLC-consistent, MUSCL-aware face flux. Sum σ_i · F_mass · A_i
+    across legs.
+
+    Returns (R, face_states, inner_iter_max, energy_dissipation_W).
+    face_states[i] = (ρ_ghost, u_ghost, p_ghost, F_mass_leg_i) to match
+    the Phase-E interface.
+    """
+    R = 0.0
+    face_states: List[Tuple[float, float, float, float]] = []
+    inner_iter_max = 0
+    energy_loss_W = 0.0
+    for i, (leg, interior, ref) in enumerate(zip(legs, interiors, references)):
+        (rho_i, u_i, p_i, Y_i, c_i, A_i, gamma_leg,
+         rho_in, u_in, p_in, rhoY_in) = interior
+
+        K_in = K_incoming[i]
+        K_out = K_outgoing[i]
+        rho_g, u_g, p_g, c_g, conv, niter = _solve_inner_u_face(
+            leg, interior, ref, p0_junction, K_in, K_out,
+        )
+        if niter > inner_iter_max:
+            inner_iter_max = niter
+
+        Y_g = Y_i
+        rhoY_g = rho_g * Y_g
+
+        # Interior-side MUSCL reconstruction, same as Phase E
+        rhoY_i = rho_i * Y_i
+        rho_fI, u_fI, p_fI, Y_fI = _muscl_face_reconstruction(
+            rho_i, u_i, p_i, rhoY_i,
+            rho_in, u_in, p_in, rhoY_in,
+            rho_g, u_g, p_g, rhoY_g,
+            gamma_leg, leg.state.dx, dt, leg.end,
+        )
+
+        # HLLC face flux
+        if leg.end == RIGHT:
+            F = hllc_flux(rho_fI, u_fI, p_fI, Y_fI,
+                          rho_g, u_g, p_g, Y_g, gamma_leg)
+        else:
+            F = hllc_flux(rho_g, u_g, p_g, Y_g,
+                          rho_fI, u_fI, p_fI, Y_fI, gamma_leg)
+        F_mass = F[0]
+        R += leg.sign_into * F_mass * A_i
+
+        # Energy dissipation diagnostic: K · ½ρu³ · A · sign
+        sigma = leg.sign_into
+        K_eff = K_in if sigma * u_g > 0.0 else K_out
+        energy_loss_W += K_eff * 0.5 * rho_g * u_g * u_g * abs(u_g) * A_i
+
+        face_states.append((rho_g, u_g, p_g, F_mass))
+    return R, face_states, inner_iter_max, energy_loss_W
+
+
 def _hllc_mass_residual(
     legs: List[JunctionLeg],
     interiors: List[Tuple[float, float, float, float, float, float, float,
@@ -391,6 +568,16 @@ class CharacteristicJunction:
     newton_max_iter: int = 30
     choke_margin: float = 0.02      # |M| < 1 − margin counts as subsonic
 
+    # Phase F1 — Corberán loss coefficients (K = 0 default = Phase-E
+    # fast path with exact bit-for-bit backward compatibility).
+    # K_incoming[i] applies on leg i when σ_i · u_face,i > 0 (inflow
+    # INTO the junction). K_outgoing[i] applies when σ_i · u_face,i < 0
+    # (outflow FROM the junction). Typical published values for
+    # sharp-edged merges: K_in ≈ 0.3–0.6, K_out ≈ 0.05–0.2
+    # (Winterbone & Pearson 1999 ch. 9; Corberán & Gascón 1995 IJTS).
+    K_incoming: List[float] = field(default_factory=list)
+    K_outgoing: List[float] = field(default_factory=list)
+
     # Internal-only: inflow-entropy Picard correction. On by default.
     # NOT in the constructor signature to prevent it being used as a
     # result-tuning lever (the junction is more correct with it on,
@@ -401,9 +588,38 @@ class CharacteristicJunction:
     last_p_junction: float = 101325.0
     last_mass_residual: float = 0.0
     last_energy_residual: float = 0.0
+    last_energy_dissipation_W: float = 0.0   # Phase F1 — Corberán K·½ρu³A
     last_niter: int = 0
+    last_inner_iter_max: int = 0              # Phase F1 — max inner-secant steps
     last_regime: str = "subsonic"
     last_y_mixed: float = 0.0
+
+    def __post_init__(self) -> None:
+        n_legs = len(self.legs)
+        if not self.K_incoming:
+            self.K_incoming = [0.0] * n_legs
+        if not self.K_outgoing:
+            self.K_outgoing = [0.0] * n_legs
+        if len(self.K_incoming) != n_legs:
+            raise ValueError(
+                f"K_incoming has length {len(self.K_incoming)}, "
+                f"expected {n_legs} (= len(legs))"
+            )
+        if len(self.K_outgoing) != n_legs:
+            raise ValueError(
+                f"K_outgoing has length {len(self.K_outgoing)}, "
+                f"expected {n_legs} (= len(legs))"
+            )
+        for k in self.K_incoming + self.K_outgoing:
+            if k < 0.0:
+                raise ValueError(f"K coefficients must be ≥ 0, got {k}")
+
+    @property
+    def _uses_corberan(self) -> bool:
+        """True if any K is nonzero — selects the Corberán code path.
+        False → Phase-E constant-static-pressure fast path (exact
+        bit-for-bit equality with pre-F1 behavior)."""
+        return any(k > 0.0 for k in self.K_incoming + self.K_outgoing)
 
     # --- lifecycle ------------------------------------------------------
 
@@ -425,7 +641,10 @@ class CharacteristicJunction:
 
         interiors = [_interior_primitives(L) for L in self.legs]
 
-        # Initial guess: area-weighted mean of interior pressures
+        # Initial guess: area-weighted mean of interior pressures.
+        # For the Corberán path this seeds p_0_junction; for the fast
+        # path it seeds p_j directly. They are close numerically at
+        # low Mach.
         sum_pA = sum(it[2] * it[5] for it in interiors)
         sum_A  = sum(it[5] for it in interiors)
         p_j = sum_pA / sum_A
@@ -435,7 +654,40 @@ class CharacteristicJunction:
         # inflow-entropy Picard pass below.
         references = [(it[0], it[1], it[2], it[4]) for it in interiors]
 
-        # --- Secant iteration on HLLC-consistent mass balance ----------
+        # --- Phase F1: Corberán path when any K > 0 --------------------
+        if self._uses_corberan:
+            # Seed p_0_junction ~ p_j + area-weighted ½ρu² across
+            # interiors. At low-Mach the correction is small; the secant
+            # refines it.
+            sum_dyn = sum(
+                0.5 * it[0] * it[1] * it[1] * it[5] for it in interiors
+            )
+            p0_j = p_j + sum_dyn / max(sum_A, 1e-9)
+            (p0_j, niter, face_states, converged,
+             inner_iter_max, energy_W) = self._secant_corberan(
+                interiors, references, p0_j, dt,
+            )
+            if not converged:
+                raise JunctionConvergenceError(
+                    f"CharacteristicJunction (Corberán path) did not "
+                    f"converge in {self.newton_max_iter} secant steps. "
+                    f"last p_0_j = {p0_j:.1f} Pa, last |R| = "
+                    f"{self.last_mass_residual:.3e} kg/s."
+                )
+            self.last_p_junction = p0_j
+            self.last_niter = niter
+            self.last_inner_iter_max = inner_iter_max
+            self.last_energy_dissipation_W = energy_W
+            self.last_regime = "subsonic_corberan"
+            Y_mixed = self._compute_mixed_Y(interiors, face_states)
+            self.last_y_mixed = Y_mixed
+            self.last_energy_residual = self._energy_residual(
+                interiors, face_states,
+            )
+            self._write_ghosts(interiors, face_states, Y_mixed, p0_j)
+            return
+
+        # --- Phase-E fast path (all K = 0) -----------------------------
         p_j, niter, face_states, converged = self._secant_mass_balance(
             interiors, references, p_j, dt,
         )
@@ -499,7 +751,59 @@ class CharacteristicJunction:
         fluxes directly. Method kept for API symmetry with JunctionCV."""
         _ = dt
 
-    # --- Secant mass balance (HLLC-consistent) -------------------------
+    # --- Secant on p_0_junction (Corberán K > 0 path) ------------------
+
+    def _secant_corberan(self, interiors, references, p0_j, dt):
+        """Outer secant iteration on p_0_junction with the Corberán
+        residual. For each p_0_j candidate, per-leg inner solves find
+        the face state consistent with the K·½ρu² loss relation;
+        returns the summed σ_i · F_mass · A_i along with diagnostics.
+        """
+        p_floor = 1000.0
+        dp_fd = 50.0   # 50 Pa perturbation for secant priming (wider than
+                       # Phase-E because p_0_j is stagnation, not static)
+
+        R0, fs0, ii0, eW0 = _corberan_mass_residual(
+            self.legs, interiors, p0_j, references, dt,
+            self.K_incoming, self.K_outgoing,
+        )
+        self.last_mass_residual = R0
+        if abs(R0) < self.newton_tol:
+            return p0_j, 1, fs0, True, ii0, eW0
+
+        p_prev, R_prev = p0_j, R0
+        p_curr = p0_j + dp_fd
+        R_curr, fs_curr, ii_curr, eW_curr = _corberan_mass_residual(
+            self.legs, interiors, p_curr, references, dt,
+            self.K_incoming, self.K_outgoing,
+        )
+
+        for it in range(self.newton_max_iter):
+            self.last_mass_residual = R_curr
+            if abs(R_curr) < self.newton_tol:
+                return p_curr, it + 2, fs_curr, True, ii_curr, eW_curr
+            denom = R_curr - R_prev
+            if abs(denom) < 1e-30:
+                return p_curr, it + 2, fs_curr, False, ii_curr, eW_curr
+            slope = denom / (p_curr - p_prev)
+            dp = -R_curr / slope
+            cap = 0.2 * p_curr
+            if dp > cap:
+                dp = cap
+            elif dp < -cap:
+                dp = -cap
+            p_next = max(p_curr + dp, p_floor)
+            R_next, fs_next, ii_next, eW_next = _corberan_mass_residual(
+                self.legs, interiors, p_next, references, dt,
+                self.K_incoming, self.K_outgoing,
+            )
+            p_prev, R_prev = p_curr, R_curr
+            p_curr, R_curr, fs_curr = p_next, R_next, fs_next
+            ii_curr, eW_curr = ii_next, eW_next
+
+        return p_curr, self.newton_max_iter + 1, fs_curr, False, ii_curr, eW_curr
+
+    # --- Secant mass balance (HLLC-consistent; Phase-E fast path) ------
 
     def _secant_mass_balance(self, interiors, references, p_j, dt):
         """Secant iteration on p_j with the HLLC-based residual. Secant
