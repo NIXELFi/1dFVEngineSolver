@@ -113,30 +113,35 @@ The global constraint (1) closes the scalar unknown `p_0,junction`.
 
 For an N-leg junction: (1 + 4N) unknowns, (1 + 4N) equations. Well-posed.
 
-### 1f. Backward compatibility
+### 1f. Backward compatibility — K=0 fast path
 
 When K_i = 0 for all legs, eq (2) reduces to `p_0,face,i = p_0,junction`.
 Combined with the stagnation-pressure definition and the characteristic
-relations, this implies `p_face,i = p_0,junction − ½ρ_face,i · u_face,i²`.
+relations, this Corberán reduction is *approximately but not identically*
+equal to the Phase-E constant-static-pressure formulation. They differ
+by O(M²) ≈ 1–5% at typical engine exhaust Mach numbers.
 
-The constant-static-pressure formulation has `p_face,i = p_junction` where
-p_junction is the static pressure. The Corberán formulation with K = 0
-uses a common stagnation pressure instead. **These two are equivalent at
-the incompressible / low-Mach limit** where ½ρu² is negligible compared to
-p. They differ at higher Mach number by O(M²). For typical engine exhaust
-Mach numbers (up to ~0.3 at blowdown peak), this O(M²) = 0.09 discrepancy
-is small but not zero.
+**Design decision (revised per review):** use a **K=0 fast path**. The
+constructor detects `all(K_i == 0)` once (K values are compile-time
+constants, not dynamic) and selects the code path accordingly:
 
-**Design decision on K=0 backward compatibility.** The Corberán
-formulation with K=0 is *approximately* but not *identically* equal to
-the constant-static-pressure formulation. To make the K=0 reduction
-*exactly* match the Phase E baseline, we would need to keep both
-formulations and switch between them. This doubles the solver code.
+```
+if any(K > 0):
+    Corberán outer-inner (constant p_0,junction)
+else:
+    Phase-E constant-static-p (single secant on p_j)
+```
 
-**Proposal:** accept the O(M²) difference at K=0 and document it. The
-Phase-E-vs-Phase-F A3 baseline will shift by O(1%) even at K=0, which is
-a known consequence of swapping formulations. All downstream tests
-adjust their baselines accordingly.
+Both paths share the characteristic compatibility relations (eqs 3a-c)
+and the HLLC-consistent MUSCL-aware Newton residual. Only the top-level
+solver branch differs. Estimated additional branching logic: 30–50 lines
+in `fill_ghosts()`, not 200+ lines of duplicated formulation.
+
+**Benefit.** Exact bit-for-bit equality with Phase E at K=0. Unit test 10
+(K=0 reduction) can assert exact equality rather than approximate. Future
+regression debugging is cleaner — a K=0 run either matches Phase E
+exactly (formulation correct) or does not (bug to investigate), with no
+approximate-equality judgment call.
 
 ---
 
@@ -178,9 +183,15 @@ For SDM26 (two-stage 4-2-1 manifold):
   K_incoming = [0.4, 0.4], K_outgoing = [0.1].
 
 For SDM25 (one-stage 4-1 manifold):
-- **4→1 junction** (P0, P1, P2, P3 → C): wider angle merge, sharper
-  contraction, expect slightly higher K_in.
-  K_incoming = [0.4, 0.4, 0.4, 0.4], K_outgoing = [0.1].
+- **4→1 junction** (P0, P1, P2, P3 → C): wider merge angle and sharper
+  contraction than SDM26's 4→2 merge → more turbulent dissipation per
+  the published K trends. Starting K_in = **0.5** (vs 0.4 for SDM26).
+  K_incoming = [0.5, 0.5, 0.5, 0.5], K_outgoing = [0.1].
+
+The K_in = 0.5 vs K_in = 0.4 split gives the Corberán formulation a
+better chance of producing the right SDM25 power-curve shape on the
+first F1c run, which keeps F1d calibration adjustments small and
+geometry-attributable.
 
 These are starting values. They get calibrated against SDM25 dyno in F1d.
 
@@ -215,17 +226,31 @@ Newton (secant, consistent with Phase E2b) iterates `p_0,junction` until
 global mass balance.
 
 **Inner.** For each leg, the 4-unknown subsystem reduces to a scalar
-nonlinear equation. Parameterize by face static pressure `p_face,i`
-(alternative: by `u_face,i` — either works; I'll use `p_face,i`). Steps:
+nonlinear equation. **Parameterize by face velocity `u_face,i`**
+(revised per review — u has a natural bracket from |u| < c_face = sonic
+choking, which is the exact boundary we detect for the choked branch
+anyway). Steps:
 
-1. Given `p_face,i` guess, compute `ρ_face,i` and `c_face,i` from (3b),
-   (3c) — isentropic from interior.
-2. Compute `u_face,i` from (3a).
-3. Compute `p_0,face,i = p_face,i + ½ρ_face,i · u_face,i²`.
-4. Compute expected `p_0,face,i` from (2):
+1. Given `u_face,i` guess, invert (3a) for `c_face,i`:
+   ```
+   c_face,i = c_interior,i − ((γ−1)/2) · s_end · (u_face,i − u_interior,i)
+   ```
+2. Compute `p_face,i` from isentropy (3c): `p_face = p_i · (c_face/c_i)^(2γ/(γ−1))`.
+3. Compute `ρ_face,i` from (3b): `ρ_face = ρ_i · (p_face/p_i)^(1/γ)`.
+4. Compute stagnation pressure `p_0,face,i = p_face + ½ρ_face · u_face²`.
+5. Compute expected `p_0,face,i` from (2):
    `p_0,face_expected = p_0,junction + sign(σ·u_face) · K · ½ρ_face · u_face²`
-5. Inner residual: `p_0,face_computed − p_0,face_expected`.
-6. Inner secant on `p_face,i` to drive residual to zero.
+6. Inner residual: `p_0,face_computed − p_0,face_expected`.
+7. Inner secant on `u_face,i` to drive residual to zero.
+
+**Why u_face over p_face as the inner variable:**
+- Natural bracket: |u_face| < c_face (subsonic limit). The solver
+  detects choking cleanly when the iterate tries to push |u| past
+  the sonic limit.
+- No separate Mach check needed: |u_face / c_face| is directly
+  available at each iteration step.
+- With p_face as the iterate, the choke check requires back-computing
+  u and c at each step — extra arithmetic per inner iteration.
 
 Inner iteration is per-leg and independent, so it can be vectorized /
 parallelized if needed. Expect 3–5 inner iterations per leg, 3–8 outer
@@ -314,6 +339,45 @@ document it.
 Same as Phase E: raise `JunctionAllChokedError` if every leg is choked.
 The reduced system has zero subsonic legs to balance mass.
 
+### 4d. Smooth transition at choke boundary
+
+Hard thresholds at M = 1 − `choke_margin` create discontinuous BC
+behavior when a leg transitions in or out of choke across a time step.
+The discontinuity generates spurious wave reflections as the solver
+"snaps" between formulations.
+
+**Fix: blend over the choke_margin band.** Define:
+```
+M_into = σ_i · u_face,i / c_face,i
+φ(M_into) = linear ramp from 0 (at M_into = 1 − choke_margin)
+             to 1 (at M_into = 1)
+```
+with `choke_margin = 0.02` (same value Phase E uses for the hard
+threshold).
+
+Per-leg face mass flux in the blended band:
+```
+F_mass_leg,i = (1 − φ) · F_mass_subsonic_leg,i
+             +      φ  · F_mass_choked_leg,i
+```
+
+Below the band: fully subsonic (Corberán or Phase E fast path).
+Above the band: fully choked (sonic throat flux, no K contribution).
+Inside the band: linear blend.
+
+This gives C⁰-continuous BC behavior across the choke transition. The
+band is 2% wide in Mach, which translates to ~2% of the relevant
+engine cycle duration — wide enough to eliminate spurious reflections,
+narrow enough that the blend is not physically meaningful on its own
+(neither pure subsonic Corberán nor pure choked is wrong inside the
+band; they are both approximations to a transonic regime that 1D
+inviscid can't fully capture).
+
+Implementation location: inside the per-leg face-state evaluation, after
+the inner secant converges. If the converged u_face has |M_into| in the
+blending band, evaluate both branches and combine. If outside the band,
+use the appropriate branch directly.
+
 ---
 
 ## 5. Conservation properties
@@ -353,33 +417,55 @@ as "junction dissipation" rather than "numerical error."
 the mass balance closure carries ρY automatically. The mixed-Y
 computation logic from Phase E is unchanged.
 
-### 5d. Diagnostic residuals
+### 5d. Diagnostic residuals and sweep-log reporting
 
-Add to the junction's diagnostic log:
-- `last_p_0_junction` — the solved stagnation pressure
-- `last_mass_residual` — global mass residual at converged state
-- `last_energy_dissipation_W` — the K · ½ρu³ · A loss sum across all
-  legs (positive = loss; negative would flag a physics bug)
+Per-junction diagnostics (written to the junction instance each
+`fill_ghosts` call):
+- `last_p_0_junction` — the solved stagnation pressure [Pa]
+- `last_mass_residual` — global mass residual at converged state [kg/s]
+- `last_energy_dissipation_W` — the K·½ρu³·A loss sum across all legs
+  on this junction [W]. Positive = loss; a persistently negative value
+  would flag a physics bug.
 - `last_inner_iter_max` — max inner-iteration count across legs
+- `last_niter` — outer secant iterations
 
-Report `last_energy_dissipation_W` in the sweep log so we can track
-junction losses across the RPM grid.
+**Sweep-log integration (F1d).** Extend the per-RPM sweep output with
+a new column `junction_loss_kW` reporting the cycle-averaged sum of
+`last_energy_dissipation_W` across all junctions in the engine model,
+converted to kW. For SDM26 this sums 3 junctions; for SDM25 this is
+1 junction.
+
+**Sanity expectations.**
+- K=0.4, typical blowdown u ~ 100 m/s, ρ ~ 1 kg/m³, A ~ 8e-4 m²:
+  per-leg instantaneous loss ~ 0.4 · 0.5 · 1 · 10⁶ · 8e-4 = 160 W.
+  Cycle-averaged across 4 primaries: ~50 W per junction peak.
+  Summed over 3 SDM26 junctions: ~150 W steady, peaking at a few
+  hundred W during blowdown. **Not a few kW.** If the diagnostic
+  reports > 1 kW cycle-average, K is too aggressive.
+- Very low values (< 10 W cycle-average) suggest K is too small, or
+  the characteristic junction is still not generating enough velocity
+  perturbation to activate meaningful loss.
+
+The sweep-log column gives us a sanity check on K values before we
+even run the dyno comparison — any implausible loss magnitude flags
+a problem with the implementation or the K choice.
 
 ---
 
 ## 6. Backward compatibility with Phase E
 
-### 6a. K = 0 reduces to approximately constant-static-pressure
+### 6a. K = 0 uses the Phase-E constant-static-pressure fast path
 
-Discussed in §1f. Not *identically* equal, but matches within O(M²) ≈ 1-5%
-of the wave amplitude at typical engine operating conditions. Acceptable.
+Revised per review (see §1f). When all K_i = 0 the constructor
+selects the Phase-E code path, giving **exact bit-for-bit equality**
+with Phase E at K=0. No O(M²) approximation is accepted.
 
 ### 6b. K = 0 reduction test
 
-Unit test 10 (from the plan): run A3 with K = 0 on all legs. Expect
-R_round_trip within 5% of the Phase E baseline (+0.7484). If the
-measured value is significantly different (say > 10% off), the
-formulation or implementation has a bug.
+Unit test 10: run A3 with K = 0 on all legs. Expect R_round_trip
+**exactly equal** to the Phase-E baseline (+0.7484) to machine
+precision. If the measured value differs at all, the fast-path
+selection or shared helpers have a bug.
 
 ### 6c. Engine model backward compatibility
 
@@ -497,42 +583,87 @@ Each sub-phase is its own commit.
 
 ---
 
-## 9. Open questions for review
+## 9. Review outcomes (resolved 2026-04-15)
 
-**Q1** — K_in / K_out values. Do you have Winterbone on hand or a prior
-dyno-validated K for SDM-class manifolds? If yes, supply values. If no,
-default to my starting estimates (K_in=0.4, K_out=0.1) with the plan to
-tune in F1d.
+The six design questions were resolved in review. Summary of final
+decisions now reflected in the sections above:
 
-**Q2** — Sign convention in eq (2). I wrote `sign(σ·u_face)` such that
-inflow (σu > 0) gives positive loss (p_0,face > p_0,junction). Please
-sanity-check — Corberán may use the reverse convention.
+- **Q1 (K values).** Starting estimates confirmed: K_in = 0.4,
+  K_out = 0.1 for SDM26 junctions. **K_in = 0.5** for the SDM25 4→1
+  junction (wider merge angle, sharper contraction → more
+  dissipation). Final values tuned in F1d within the [0.3, 0.6] /
+  [0.05, 0.2] published ranges.
+- **Q2 (sign convention).** Confirmed: `sign(σ·u_face)` with inflow
+  giving p_0,face > p_0,junction.
+- **Q3 (choked-branch).** Confirmed: zero K contribution from choked
+  legs (sonic throat dissipates). Documented in §4b that this
+  targets the Corberán loss correction at late-exhaust / intake-
+  overlap regimes where tuned-length physics matters most.
+- **Q4 (K=0 backward compat).** **Revised:** use K=0 fast path for
+  exact Phase-E equality (see §1f and §6a). Implementation cost
+  ~30-50 lines, benefit is exact bit-for-bit regression.
+- **Q5 (inner unknown).** **Revised:** iterate on `u_face,i` (not
+  `p_face,i`). Natural bracket from sonic limit, no separate Mach
+  check needed. See §3a.
+- **Q6 (sweep-log reporting).** Confirmed: `junction_loss_kW`
+  column added to per-RPM sweep output. Cycle-averaged sum across
+  all junctions in the engine model. See §5d.
 
-**Q3** — Choked-branch loss term. §4b proposes zero K contribution from
-choked legs (the sonic throat itself dissipates). Confirm this is the
-right simplification or flag if you want the Corberán loss applied at
-the throat as well.
+Two additional specifications added:
 
-**Q4** — K=0 backward compatibility. Discussed in §1f and §6a. The
-Corberán formulation with K=0 is approximately but not identically
-equal to Phase E's constant-static-pressure. Accept the ~1-5% A3
-baseline shift at K=0 vs exactly reproducing Phase E? The alternative
-is to maintain both formulations side-by-side, which doubles solver
-code.
-
-**Q5** — Inner-solve parameter. I proposed iterating on `p_face,i` as
-the inner unknown. Alternative: iterate on `u_face,i`. Either works
-mathematically. Any preference?
-
-**Q6** — Energy loss reporting. §5d proposes `last_energy_dissipation_W`
-as a new diagnostic. Want this reported in the sweep log per point
-alongside the existing conservation diagnostics?
+- **Smooth choke transition** (§4d): blend subsonic and choked
+  branches linearly over a 2% Mach band around 1.0 to avoid
+  discontinuous BC behavior and spurious reflections across
+  choke transitions.
+- **F1d expectations calibrated to reality** (§10): the aspirational
+  gates (r_T > 0.4, RMSE_P < 5 kW) may or may not all clear — what
+  matters is substantial improvement and K values inside the
+  Winterbone range. No over-tuning to hit metrics artificially.
 
 ---
 
-## 10. After this is approved
+## 10. F1d calibration — realistic expectations
 
-Proceed to **F1b** on the same `phase-f/calibration` branch. Commit the
-design doc separately before touching the code.
+The F1d acceptance gates were set aspirationally in the original plan.
+Realistic expectations based on the pre-F1 residual error structure:
 
-No code until these questions are answered.
+- **r_P (power shape correlation)**: pre-F1 = 0.75. Target 0.85.
+  Achievable range 0.85–0.90.
+- **r_T (torque shape correlation)**: pre-F1 = **−0.30**. Target > 0.4.
+  The negative correlation was driven by the spurious 5100 RPM
+  junction-overshoot peak. Corberán with reasonable K should collapse
+  that peak, turning r_T positive. Achievable range 0.3–0.5. May not
+  clear 0.4 if there are other residual shape-mismatch sources
+  (combustion model, wall heat).
+- **RMSE_P**: pre-F1 = 9.5 kW. Target < 5 kW. Achievable range 4–6 kW.
+- **RMSE_T**: pre-F1 = 13.8 Nm. Target < 8 Nm. Achievable range 7–10 Nm.
+
+**If all gates clear** with K inside the published range: commit as
+calibrated baseline, proceed to F2–F4.
+
+**If substantial improvement is achieved but some gates miss**:
+commit K values, document residual error sources, proceed to F2–F4.
+F2 (Levine-Schwinger) and F4 (Wiebe ramp) may close some of the
+remaining gaps, particularly on r_T and torque-band errors.
+
+**Do not over-tune K** to clear the gates. K stays inside the
+Winterbone published range.
+
+---
+
+## 11. After this is committed
+
+Proceed to **F1b** on the same `phase-f/calibration` branch. This
+design doc gets committed as a separate commit before any code.
+
+F1b sub-plan:
+1. Extend `CharacteristicJunction` dataclass with K_incoming,
+   K_outgoing arrays + new diagnostics.
+2. Implement K=0 fast path (preserve current Phase E solver unchanged).
+3. Implement K>0 Corberán outer-inner solver (secant on p_0,junction,
+   per-leg inner secant on u_face,i).
+4. Implement smooth choke-transition blending.
+5. Write 3 new unit tests (K=0 reduction at exact equality, K scaling
+   monotonicity, K asymmetry with mass-conservation check).
+6. Verify all 12 unit tests pass.
+7. Stop for review before F1c engine integration.
