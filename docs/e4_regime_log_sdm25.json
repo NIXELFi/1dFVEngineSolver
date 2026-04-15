@@ -1,0 +1,172 @@
+{
+  "label": "SDM25",
+  "regime_total": {
+    "startup": 121723,
+    "subsonic_inflow": 23788,
+    "choked_inflow": 486055,
+    "subsonic_outflow": 350510,
+    "choked_outflow": 10455
+  },
+  "per_rpm": [
+    {
+      "rpm": 6000.0,
+      "regime_counts": {
+        "startup": 15434,
+        "subsonic_inflow": 2414,
+        "choked_inflow": 34543,
+        "subsonic_outflow": 42041,
+        "choked_outflow": 1049
+      }
+    },
+    {
+      "rpm": 6500.0,
+      "regime_counts": {
+        "startup": 12577,
+        "subsonic_inflow": 2365,
+        "choked_inflow": 39872,
+        "subsonic_outflow": 33230,
+        "choked_outflow": 1940
+      }
+    },
+    {
+      "rpm": 7000.0,
+      "regime_counts": {
+        "startup": 10647,
+        "subsonic_inflow": 1664,
+        "choked_inflow": 32958,
+        "subsonic_outflow": 30337,
+        "choked_outflow": 1197
+      }
+    },
+    {
+      "rpm": 7500.0,
+      "regime_counts": {
+        "startup": 8701,
+        "subsonic_inflow": 2075,
+        "choked_inflow": 31161,
+        "subsonic_outflow": 23005,
+        "choked_outflow": 894
+      }
+    },
+    {
+      "rpm": 8000.0,
+      "regime_counts": {
+        "startup": 7608,
+        "subsonic_inflow": 2000,
+        "choked_inflow": 32342,
+        "subsonic_outflow": 19401,
+        "choked_outflow": 813
+      }
+    },
+    {
+      "rpm": 8500.0,
+      "regime_counts": {
+        "startup": 7065,
+        "subsonic_inflow": 1095,
+        "choked_inflow": 31317,
+        "subsonic_outflow": 18808,
+        "choked_outflow": 366
+      }
+    },
+    {
+      "rpm": 9000.0,
+      "regime_counts": {
+        "startup": 7807,
+        "subsonic_inflow": 1595,
+        "choked_inflow": 32605,
+        "subsonic_outflow": 18513,
+        "choked_outflow": 138
+      }
+    },
+    {
+      "rpm": 9500.0,
+      "regime_counts": {
+        "startup": 8143,
+        "subsonic_inflow": 3062,
+        "choked_inflow": 45080,
+        "subsonic_outflow": 24187,
+        "choked_outflow": 133
+      }
+    },
+    {
+      "rpm": 10000.0,
+      "regime_counts": {
+        "startup": 5971,
+        "subsonic_inflow": 1610,
+        "choked_inflow": 39684,
+        "subsonic_outflow": 24869,
+        "choked_outflow": 610
+      }
+    },
+    {
+      "rpm": 10500.0,
+      "regime_counts": {
+        "startup": 5620,
+        "subsonic_inflow": 1177,
+        "choked_inflow": 34680,
+        "subsonic_outflow": 22320,
+        "choked_outflow": 299
+      }
+    },
+    {
+      "rpm": 11000.0,
+      "regime_counts": {
+        "startup": 4471,
+        "subsonic_inflow": 914,
+        "choked_inflow": 25595,
+        "subsonic_outflow": 16056,
+        "choked_outflow": 122
+      }
+    },
+    {
+      "rpm": 11500.0,
+      "regime_counts": {
+        "startup": 5939,
+        "subsonic_inflow": 909,
+        "choked_inflow": 22636,
+        "subsonic_outflow": 18434,
+        "choked_outflow": 852
+      }
+    },
+    {
+      "rpm": 12000.0,
+      "regime_counts": {
+        "startup": 5018,
+        "subsonic_inflow": 1305,
+        "choked_inflow": 19510,
+        "subsonic_outflow": 14385,
+        "choked_outflow": 1380
+      }
+    },
+    {
+      "rpm": 12500.0,
+      "regime_counts": {
+        "startup": 6527,
+        "subsonic_inflow": 593,
+        "choked_inflow": 24309,
+        "subsonic_outflow": 16794,
+        "choked_outflow": 412
+      }
+    },
+    {
+      "rpm": 13000.0,
+      "regime_counts": {
+        "startup": 5087,
+        "subsonic_inflow": 408,
+        "choked_inflow": 19417,
+        "subsonic_outflow": 13428,
+        "choked_outflow": 126
+      }
+    },
+    {
+      "rpm": 13500.0,
+      "regime_counts": {
+        "startup": 5108,
+        "subsonic_inflow": 602,
+        "choked_inflow": 20346,
+        "subsonic_outflow": 14702,
+        "choked_outflow": 124
+      }
+    }
+  ]
+}
