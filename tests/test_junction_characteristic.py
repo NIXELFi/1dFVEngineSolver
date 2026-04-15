@@ -420,3 +420,84 @@ def test_4_three_pipe_symmetric_merge_identity():
         assert drho < 1e-5, f"{label} Δρ max = {drho:.3e} kg/m³"
 
     assert junction.last_regime == "subsonic"
+
+
+# ---------------------------------------------------------------------------
+# Test 5: three-pipe merge with incoming wave
+# ---------------------------------------------------------------------------
+
+def test_5_three_pipe_merge_with_incoming_wave():
+    """Three identical pipes meeting at a 3-way characteristic
+    junction, open outer ends. Launch an acoustic pulse in ONE of
+    the incoming legs (p1). Verify:
+
+      (a) mass conservation across the junction at every step:
+          Σ σ_i ρ_f u_f A_i ≈ 0 to Newton tolerance.
+      (b) symmetric partition: the wave transmits into the other
+          two legs in proportion to their (equal) impedances. For
+          a 3-way merge with identical legs and one source, the
+          two receivers should see equal peak amplitudes (within
+          10%).
+    """
+    L = 0.5
+    D = 0.04
+    N = 120
+    p1 = _make_uniform_pipe(L, D, N)   # source leg
+    p2 = _make_uniform_pipe(L, D, N)   # receiver leg A
+    p3 = _make_uniform_pipe(L, D, N)   # receiver leg B
+
+    _launch_acoustic_pulse(p1, overpressure_peak=2000.0,
+                           center_frac=0.20, width_cells=10)
+
+    legs = [
+        JunctionLeg(p1, RIGHT),
+        JunctionLeg(p2, RIGHT),
+        JunctionLeg(p3, LEFT),
+    ]
+    junction = CharacteristicJunction(
+        legs=legs, gamma=GAMMA, R_gas=R_GAS,
+    )
+
+    c0 = float(np.sqrt(GAMMA * P_ATM / (P_ATM / (R_GAS * T_ATM))))
+    t_end = 1.1 * (L + L) / c0
+
+    mass_residual_history = []
+    probe_p2 = []
+    probe_p3 = []
+    t = 0.0
+    while t < t_end:
+        fill_transmissive_left(p1)
+        fill_transmissive_left(p2)
+        fill_transmissive_right(p3)
+        junction.fill_ghosts()
+        mass_residual_history.append(abs(junction.last_mass_residual))
+        dt = min(
+            cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
+            cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
+            cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
+        )
+        _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
+        junction.absorb_fluxes(dt)
+        probe_p2.append(_pipe_probe_pressure(p2, 0.95))
+        probe_p3.append(_pipe_probe_pressure(p3, 0.05))
+        t += dt
+
+    probe_p2 = np.array(probe_p2)
+    probe_p3 = np.array(probe_p3)
+
+    max_R = float(np.max(mass_residual_history))
+    assert max_R < 1e-6, (
+        f"max |Σ σ ρu A| at junction = {max_R:.3e} kg/s "
+        f"(Newton tolerance is 1e-9)"
+    )
+
+    A_p2 = float(np.max(np.abs(probe_p2 - P_ATM)))
+    A_p3 = float(np.max(np.abs(probe_p3 - P_ATM)))
+    if max(A_p2, A_p3) > 0.0:
+        split_asymmetry = abs(A_p2 - A_p3) / max(A_p2, A_p3)
+    else:
+        split_asymmetry = float("inf")
+    assert split_asymmetry < 0.10, (
+        f"3-way split is asymmetric: A_p2={A_p2:.2f} Pa, A_p3={A_p3:.2f} Pa, "
+        f"asymmetry={split_asymmetry:.3f} (expected < 0.10)"
+    )
