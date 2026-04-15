@@ -33,6 +33,7 @@ from solver.sources import apply_sources
 
 from bcs.restrictor import fill_choked_restrictor_left
 from bcs.junction_cv import JunctionCV, JunctionCVLeg, LEFT, RIGHT
+from bcs.junction_characteristic import CharacteristicJunction, JunctionLeg
 from bcs.valve import fill_valve_ghost_characteristic as fill_valve_ghost  # Phase C1 fix (2026-04-14)
 from bcs.simple import fill_transmissive_right
 
@@ -482,7 +483,26 @@ class SDM26Engine:
     cylinders' per-cycle accumulators.
     """
 
-    def __init__(self, cfg: SDM26Config):
+    def __init__(self, cfg: SDM26Config, junction_type: str = "stagnation"):
+        """Construct the SDM26 engine model.
+
+        ``junction_type``:
+          - ``"stagnation"`` (default): JunctionCV, strictly conservative
+            in mass + energy + ρY, dissipative at the junction face
+            (per-junction acoustic transmission ~0.69 for 4-2-1 geometry).
+            Recommended for standard engine runs.
+          - ``"characteristic"``: CharacteristicJunction, per-junction
+            transmission ~0.91 at linear amplitude, mass-conservative to
+            machine precision, energy-conservative to O(ΔA/A̅) +
+            O(Δs/s̅) across the junction face. Use when tuned-length
+            effects matter (Phase E acoustic-BC work).
+        """
+        if junction_type not in ("stagnation", "characteristic"):
+            raise ValueError(
+                f"junction_type must be 'stagnation' or 'characteristic', "
+                f"got {junction_type!r}"
+            )
+        self.junction_type = junction_type
         self.cfg = cfg
 
         # Plenum pipe — straight, area = volume/length
@@ -553,41 +573,51 @@ class SDM26Engine:
         for p in self.all_pipes:
             self._ensure_scratch(p)
 
-        # Junction CVs
-        self.j_intake = JunctionCV.from_legs(
-            [JunctionCVLeg(self.plenum, RIGHT)] +
-            [JunctionCVLeg(r, LEFT) for r in self.runners],
-            p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+        # Junction factory — builds a stagnation or characteristic
+        # junction from a list of (pipe, end) leg specs.
+        def _make_junction(leg_specs):
+            if junction_type == "stagnation":
+                cv_legs = [JunctionCVLeg(pipe, end) for pipe, end in leg_specs]
+                return JunctionCV.from_legs(
+                    cv_legs,
+                    p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+                )
+            else:  # "characteristic"
+                char_legs = [JunctionLeg(pipe, end) for pipe, end in leg_specs]
+                return CharacteristicJunction(
+                    legs=char_legs, gamma=1.4, R_gas=287.0,
+                )
+
+        # Intake junction: plenum + 4 runners
+        self.j_intake = _make_junction(
+            [(self.plenum, RIGHT)] +
+            [(r, LEFT) for r in self.runners]
         )
-        self.junctions: List[JunctionCV] = [self.j_intake]
+        self.junctions = [self.j_intake]
 
         if cfg.exhaust_topology == "4-2-1":
             # 4-2-1: (p0, p3) → s0 ; (p1, p2) → s1 ; (s0, s1) → collector
-            self.j_exh1 = JunctionCV.from_legs(
-                [JunctionCVLeg(self.primaries[0], RIGHT),
-                 JunctionCVLeg(self.primaries[3], RIGHT),
-                 JunctionCVLeg(self.secondaries[0], LEFT)],
-                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-            )
-            self.j_exh2 = JunctionCV.from_legs(
-                [JunctionCVLeg(self.primaries[1], RIGHT),
-                 JunctionCVLeg(self.primaries[2], RIGHT),
-                 JunctionCVLeg(self.secondaries[1], LEFT)],
-                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-            )
-            self.j_exh3 = JunctionCV.from_legs(
-                [JunctionCVLeg(self.secondaries[0], RIGHT),
-                 JunctionCVLeg(self.secondaries[1], RIGHT),
-                 JunctionCVLeg(self.collector, LEFT)],
-                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
-            )
+            self.j_exh1 = _make_junction([
+                (self.primaries[0], RIGHT),
+                (self.primaries[3], RIGHT),
+                (self.secondaries[0], LEFT),
+            ])
+            self.j_exh2 = _make_junction([
+                (self.primaries[1], RIGHT),
+                (self.primaries[2], RIGHT),
+                (self.secondaries[1], LEFT),
+            ])
+            self.j_exh3 = _make_junction([
+                (self.secondaries[0], RIGHT),
+                (self.secondaries[1], RIGHT),
+                (self.collector, LEFT),
+            ])
             self.junctions.extend([self.j_exh1, self.j_exh2, self.j_exh3])
         else:
-            # 4-1: all 4 primaries feed collector directly via one junction CV
-            self.j_exh1 = JunctionCV.from_legs(
-                [JunctionCVLeg(p, RIGHT) for p in self.primaries] +
-                [JunctionCVLeg(self.collector, LEFT)],
-                p_init=cfg.p_ambient, T_init=cfg.T_ambient, Y_init=0.0,
+            # 4-1: all 4 primaries feed collector directly via one junction
+            self.j_exh1 = _make_junction(
+                [(p, RIGHT) for p in self.primaries] +
+                [(self.collector, LEFT)]
             )
             self.junctions.append(self.j_exh1)
 
@@ -643,9 +673,9 @@ class SDM26Engine:
 
     # ---- BC helpers ----
 
-    def _junction_fill_ghosts(self) -> None:
+    def _junction_fill_ghosts(self, dt: float) -> None:
         for j in self.junctions:
-            j.fill_ghosts()
+            j.fill_ghosts(dt)
 
     def _junction_absorb_fluxes(self, dt: float) -> None:
         for j in self.junctions:
@@ -679,7 +709,7 @@ class SDM26Engine:
         fill_choked_restrictor_left(
             self.plenum, cfg.p_ambient, cfg.T_ambient, A_t, cfg.restrictor_Cd,
         )
-        self._junction_fill_ghosts()
+        self._junction_fill_ghosts(dt)
 
         for i, cyl in enumerate(self.cylinders):
             theta_local = cyl.local_theta(theta_deg)
@@ -886,7 +916,10 @@ class SDM26Engine:
         for c in self.cylinders:
             total += float(c.state.m)
         for j in self.junctions:
-            total += float(j.M)
+            # JunctionCV stores mass in `M` (0-D control volume).
+            # CharacteristicJunction has no CV state (mass passes
+            # through the face directly); skip the add.
+            total += float(getattr(j, "M", 0.0))
         return total
 
 

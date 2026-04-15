@@ -126,9 +126,14 @@ class JunctionCV:
 
     # ---- BC: fill each leg's pipe-end ghost cells with our stagnation state ----
 
-    def fill_ghosts(self) -> None:
+    def fill_ghosts(self, dt: float = 0.0) -> None:
         """Called BEFORE the pipe MUSCL step. Sets each pipe's junction-end
         ghost cells to the CV's stagnation reservoir state.
+
+        ``dt`` parameter is ignored for the stagnation-CV junction; it is
+        accepted for signature compatibility with CharacteristicJunction
+        so callers can swap junction types without changing their
+        step-loop code.
         """
         rho = self.rho()
         p = self.p()
