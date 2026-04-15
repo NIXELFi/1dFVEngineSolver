@@ -368,3 +368,55 @@ def test_3_two_pipe_wave_transmission():
         f"(A_incident={A_incident:.2f} Pa, A_transmitted={A_transmitted:.2f} Pa). "
         f"Expected > 0.95 for identical pipes through a characteristic junction."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 4: three-pipe symmetric merge identity
+# ---------------------------------------------------------------------------
+
+def test_4_three_pipe_symmetric_merge_identity():
+    """Three identical pipes meeting at a 3-way characteristic junction,
+    uniform initial state, sealed reflective outer ends, 500 time
+    steps. Verify the multi-leg topology produces zero flux and no
+    perturbation when there is no driving gradient.
+
+    Multi-leg analogue of test 1. The Newton mass balance across 3
+    legs is the step up from 2 legs; this catches any bug in the
+    multi-leg residual that the 2-leg case doesn't exercise."""
+    L = 0.5
+    D = 0.04
+    N = 40
+    p1 = _make_uniform_pipe(L, D, N)
+    p2 = _make_uniform_pipe(L, D, N)
+    p3 = _make_uniform_pipe(L, D, N)
+
+    legs = [
+        JunctionLeg(p1, RIGHT),
+        JunctionLeg(p2, RIGHT),
+        JunctionLeg(p3, LEFT),
+    ]
+    junction = CharacteristicJunction(
+        legs=legs, gamma=GAMMA, R_gas=R_GAS,
+    )
+
+    rho_ref = P_ATM / (R_GAS * T_ATM)
+    for _ in range(500):
+        fill_reflective_left(p1)
+        fill_reflective_left(p2)
+        fill_reflective_right(p3)
+        junction.fill_ghosts()
+        dt = min(
+            cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
+            cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
+            cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
+        )
+        _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
+        junction.absorb_fluxes(dt)
+
+    for label, pipe in [("p1", p1), ("p2", p2), ("p3", p3)]:
+        dp, du, drho = _pipe_max_dev(pipe, p_ref=P_ATM, u_ref=0.0, rho_ref=rho_ref)
+        assert dp  < 1.0,   f"{label} Δp max = {dp:.3e} Pa"
+        assert du  < 0.01,  f"{label} Δu max = {du:.3e} m/s"
+        assert drho < 1e-5, f"{label} Δρ max = {drho:.3e} kg/m³"
+
+    assert junction.last_regime == "subsonic"
