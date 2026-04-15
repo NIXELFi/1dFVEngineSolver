@@ -622,3 +622,96 @@ def test_6_four_pipe_asymmetric_merge():
 
     # (c) Stayed subsonic
     assert regimes == {"subsonic"}, f"unexpected regimes observed: {regimes}"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: choked-leg handling
+# ---------------------------------------------------------------------------
+
+def test_7_choked_leg_handling():
+    """Drive one leg to sonic conditions at the junction face and
+    verify the choked-branch dispatch handles it without crashing
+    and mass conservation still holds.
+
+    Setup: two-pipe junction. Left pipe initialized with very high
+    pressure and strong pre-existing rightward velocity so that the
+    junction face sees M ≥ 1 from the start. Right pipe at
+    atmospheric. Junction must:
+      - detect choke
+      - dispatch to choked branch
+      - solve reduced Newton for p_j using only the subsonic leg
+      - produce finite ghost-cell state
+      - keep mass residual finite and small
+    """
+    L = 0.3
+    D = 0.04
+    N = 60
+
+    # Left pipe: very high p, pre-existing M=1+ flow rightward
+    p_high = 5.0e5     # 5 bar
+    T_high = 1200.0     # hot (simulates exhaust blowdown)
+    u_high = 800.0     # ~1.5x sonic at these conditions (c ≈ 695 m/s)
+    rho_high = p_high / (R_GAS * T_high)
+
+    left = make_pipe_state(
+        n_cells=N, length=L, area_fn=lambda x: 0.25 * np.pi * D ** 2,
+        gamma=GAMMA, R_gas=R_GAS, wall_T=T_high, n_ghost=2,
+    )
+    set_uniform(left, rho=rho_high, u=u_high, p=p_high, Y=0.0)
+    _ensure_scratch(left)
+
+    right = _make_uniform_pipe(L, D, N)
+
+    legs = [JunctionLeg(left, RIGHT), JunctionLeg(right, LEFT)]
+    junction = CharacteristicJunction(
+        legs=legs, gamma=GAMMA, R_gas=R_GAS,
+    )
+
+    # Just a few steps to verify the choked branch fires and
+    # doesn't crash. No long-term stability claim.
+    c0 = float(np.sqrt(GAMMA * P_ATM / (P_ATM / (R_GAS * T_ATM))))
+    n_steps = 50
+
+    regimes_seen = set()
+    mass_residuals = []
+    for step in range(n_steps):
+        fill_reflective_left(left)   # keep driving high-p left
+        fill_transmissive_right(right)
+        junction.fill_ghosts()
+        regimes_seen.add(junction.last_regime)
+        mass_residuals.append(abs(junction.last_mass_residual))
+        # Sanity: ghost cells and last_p_junction must be finite.
+        assert np.isfinite(junction.last_p_junction), (
+            f"step {step}: p_j = {junction.last_p_junction}"
+        )
+        assert np.all(np.isfinite(left.q)), (
+            f"step {step}: left ghost went nonfinite"
+        )
+        assert np.all(np.isfinite(right.q)), (
+            f"step {step}: right ghost went nonfinite"
+        )
+        dt = min(
+            cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
+            cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
+        )
+        if dt <= 0.0:
+            pytest.fail(f"step {step}: cfl_dt returned {dt}, positivity violated")
+        _step_pipe(left, dt)
+        _step_pipe(right, dt)
+        junction.absorb_fluxes(dt)
+
+    # The choked branch must have fired at least once. It's OK if it
+    # transitions to subsonic after blowdown mixes the right pipe.
+    assert any(r.startswith("choked") for r in regimes_seen), (
+        f"choked regime never fired. Regimes seen: {regimes_seen}. "
+        f"Left interior u = {u_high} m/s is supersonic by construction; "
+        f"junction face should also be at or above M=1."
+    )
+
+    max_R = float(np.max(mass_residuals))
+    # Choked branch solves mass balance algebraically (not through
+    # Newton on all legs), so the residual reported is the Newton
+    # residual of the non-choked legs alone. Still should be tight.
+    assert max_R < 1e-3, (
+        f"choked-branch max mass residual = {max_R:.3e} kg/s"
+    )
