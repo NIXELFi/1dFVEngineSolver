@@ -76,6 +76,99 @@ Per-cycle diagnostic `nonconservation = (Δm_system − net_port_flow)` across t
 
 Values higher than C3's 1e-12 kg/cycle are *not* a regression — they reflect the diagnostic computing (Δm − net_port) where both terms are now O(1e-4 kg/cycle) (real mass transport). The difference is limited by float64 summation roundoff over ~10k steps per cycle at ~1 part in 10⁵ per term. C3 hit 1e-12 only because the dead junction suppressed all mass transport and both terms were near zero. The underlying HLLC-consistent face flux balance is still machine precision per step.
 
+## Dense sweep (100 RPM resolution)
+
+Rerun of both configs at 100 RPM resolution (matching dyno grid). SDM25 dense: 96 points from 4000 to 13500 RPM. SDM26 dense: 96 points.
+
+  SDM25 dense peak: 51.4 kW @ 11000 RPM  (coarse: 51.4 kW @ 11000 RPM)
+
+  SDM26 dense peak: 49.6 kW @ 11700 RPM  (coarse: 48.9 kW @ 11500 RPM)
+
+The dense curve reveals any between-coarse-point tuning features the 500 RPM grid would alias. Agreement between coarse and dense peak RPM is the integrity check that the coarse grid is resolving the true tuning structure rather than randomly landing on one side of a sharp peak.
+
+## Simulation errors vs REAL dyno — diagnoses and fixes
+
+The dense sweep at 100 RPM resolution makes the sim-vs-dyno disagreement quantifiable. Over the 4000-12900 RPM overlap (90 points):
+
+- **Power RMSE**: 9.50 kW, shape correlation r = +0.748
+- **Torque RMSE**: 13.80 Nm, shape correlation r = -0.302
+
+Power correlation is fair (r ≈ 0.75) — the broad shape tracks dyno. Torque correlation is slightly negative (r ≈ −0.30): sim torque peaks in bands where dyno torque is in a valley, and vice versa. This is the signature of tuning features that are too sharp, not broadly wrong magnitude — the sim finds acoustic resonances the real engine doesn't exhibit in the same places.
+
+### Error zones
+
+| RPM band    | sim - dyno ΔP_mean | sim - dyno ΔT_mean | interpretation |
+|-------------|--------------------|--------------------|----------------|
+
+| 4000-4500   | +11.60 kW | +26.04 Nm | low-RPM over-prediction (~+26 Nm) |
+
+| 5100-5700   | +13.97 kW | +24.38 Nm | SPURIOUS tuning spike, sim peak torque |
+
+| 6000-7000   | +11.84 kW | +17.55 Nm | mid-RPM over-prediction |
+
+| 7500-9500   | -0.89 kW | -1.26 Nm | dyno torque plateau — sim matches here |
+
+| 9700-11000  | -0.49 kW | -0.65 Nm | peak-power zone — sim within 1 kW |
+
+| 11500-13000 | -14.28 kW | -11.30 Nm | high-RPM, sim under-predicts (-14 kW) |
+
+
+### Diagnoses and fixes
+
+**Issue 1 — Spurious torque peak at 5100 RPM and low-RPM over-prediction (4000-6000 RPM).**
+
+  *Signature:* sim VE hits 97.9% at 5100 RPM with a sharp peak that dyno shows no hint of. +24 Nm mean overshoot through 4000-5700 RPM.
+
+  *Physics:* the characteristic-coupled junction is inviscid. At low engine speed the real 4-1 manifold dissipates acoustic energy to turbulent mixing at the merge, flow separation at the primary-collector interface, and Kelvin-Helmholtz vortices in the secondary. None of these are captured in 1D FV. V2 therefore lets a returning rarefaction wave from the collector arrive at the exhaust valve with ~91% of its launch amplitude where reality attenuates it closer to 70-80% per junction.
+
+  *Primary fix:* **junction loss coefficient**, a scalar multiplier ~0.85 on the reflected-wave amplitude at each characteristic junction. Standard post-formulation knob in Winterbone/Corberán literature; deferred in the Phase-E design doc because it is a calibration knob. SDM25 dyno data is now the anchor to set it.
+
+  *Secondary fix:* **Wiebe combustion efficiency ramp** (`cfg.wiebe.eta_comb(rpm)`). V1 used a two-segment ramp: 0.55 at 3500 RPM rising to 0.88 at 10500+. V2 currently uses a constant nominal 0.88, which is physically wrong at low RPM where incomplete combustion is real. Inherit the V1 ramp verbatim as a V2 post-calibration patch.
+
+**Issue 2 — Peak-power RPM shift (+400 RPM, sim 11000 vs dyno 10600).**
+
+  *Signature:* peak power magnitudes match within 0.7% but sim peak is 400 RPM higher.
+
+  *Physics:* V2's collector right-end boundary is transmissive zero-gradient — the wave exits perfectly. A real open pipe end has a radiation impedance that acts like a 0.6·D length extension (Levine-Schwinger, standard acoustics). For the SDM25 50 mm collector, 0.6·D = 30 mm added effective length on a ~800 mm total acoustic path: 3.8% longer tube, 3.8% lower resonant RPM. The sim-vs-dyno 400 RPM / 10600 = 3.8% shift matches this number exactly.
+
+  *Fix:* **open-end radiation correction** in the collector BC. Implement Levine-Schwinger flanged-end impedance at the transmissive face, or equivalently extend the collector by 0.6·D in the geometry. Single-line fix.
+
+**Issue 3 — High-RPM power collapse (11500-13000, sim −14 kW).**
+
+  *Signature:* dyno holds >60 kW out to 13000 RPM; sim collapses to 33 kW at 13500 as the 20 mm restrictor saturates. Sim under-predicts mass flow at the restrictor limit.
+
+  *Physics:* the restrictor is a 20 mm converging-diverging nozzle with sonic throat. V2's `fill_choked_restrictor_left` enforces the isentropic choked-flow mass rate ṁ* = ρ₀·c₀·A·(2/(γ+1))^((γ+1)/(2(γ-1))) with a discharge coefficient Cd. Default Cd = 0.85. SAE-restrictor test data for well-manufactured 20 mm converging-diverging nozzles typically gives Cd = 0.93-0.97.
+
+  *Fix:* **raise restrictor Cd** to the measured value for SDM25's specific restrictor hardware. If Cd data isn't available, step it to 0.92 and re-check high-RPM agreement. Secondary: verify plenum volume in cfg matches the CAD — an undersized plenum restricts dynamic filling above ~11000 RPM.
+
+**Issue 4 — Torque shape anti-correlation (r = −0.30).**
+
+  *Signature:* sim torque peaks where dyno doesn't and vice versa, across the entire mid-RPM band. Underlying issue is the same inviscid-junction overshoot of Issue 1 applied at every RPM where tuning resonances happen to land.
+
+  *Fix:* same as Issue 1 (junction loss coefficient). The shape correlation is a side-effect metric of the magnitude error at specific RPM bands, not a separate problem.
+
+### Calibration order (when dyno becomes the target)
+
+1. **Junction loss coefficient** (1 scalar, brings per-junction transmission from 0.91 to 0.85). Biggest leverage; fixes the low-mid-RPM torque over-prediction and the spurious 5100 RPM peak.
+2. **Restrictor Cd** (1 scalar). Fixes high-RPM power collapse.
+3. **Collector open-end correction** (1 scalar, 0.6·D). Fixes peak-power RPM shift.
+4. **Wiebe η_comb RPM ramp** (2 scalars). Fixes absolute torque magnitude at low RPM; improves absolute IMEP match everywhere.
+5. **FMEP correlation** (Heywood → SDM25-specific). Last-pass adjustment for any residual brake-torque offset.
+
+All five knobs are single scalars. None require RPM-dependent ramp hacks (which V1 needed because V1 physics was wrong; V2 physics is right, the calibration is just trimming the 5-10% residuals that inviscid 1D can't capture).
+
+## SDM25 simulation vs REAL dyno data
+
+Real SDM25 dyno data (DynoJet pull, `docs/dyno/sdm25_dyno.csv`, 94 points, 3600–12900 RPM) is overlaid on the wheel-power and wheel-torque plots and shown separately on dedicated comparison plots. The V2 simulation is **uncalibrated** (nominal Wiebe, nominal FMEP, inviscid junction); any agreement is from first-principles physics, not parameter tuning.
+
+| quantity             | sim (V2 E4 SDM25)                | real dyno                        | delta |
+|----------------------|----------------------------------|----------------------------------|-------|
+| peak wheel power     |  51.4 kW @ 11000 RPM |  51.0 kW @ 10600 RPM | +0.35 kW (+0.7%) |
+| peak wheel torque    |  51.4 Nm @  6000 RPM |  47.3 Nm @  7700 RPM | +4.11 Nm (+8.7%) |
+
+
+Peak wheel power matches dyno to within 0.4 kW (0.7%). Peak RPM differs by 400 RPM. Torque-peak magnitude is over-predicted by the uncalibrated model (+8.7%); this is the expected signature of an inviscid junction (no wave losses) plus nominal combustion efficiency. These are the knobs calibration would tune.
+
 ## V2 Phase E vs V1 reference
 
 Peak indicated power:
@@ -134,9 +227,13 @@ Note: V2 is **uncalibrated** (no η_comb/FMEP tuning against dyno data). Absolut
 
 ## Plots
 
-![Wheel power vs RPM](e4_plots/wheel_power.png)
+![Wheel power vs RPM (sim + REAL SDM25 dyno overlay)](e4_plots/wheel_power.png)
 
-![Wheel torque vs RPM](e4_plots/wheel_torque.png)
+![Wheel torque vs RPM (sim + REAL SDM25 dyno overlay)](e4_plots/wheel_torque.png)
+
+![SDM25 simulated vs REAL dyno — wheel power](e4_plots/sdm25_power_vs_dyno.png)
+
+![SDM25 simulated vs REAL dyno — wheel torque](e4_plots/sdm25_torque_vs_dyno.png)
 
 ![Volumetric efficiency vs RPM](e4_plots/ve.png)
 

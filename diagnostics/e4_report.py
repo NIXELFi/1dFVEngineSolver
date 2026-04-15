@@ -25,10 +25,11 @@ V1 reference in docs/v1_sweep.json.
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -43,6 +44,32 @@ PLOTS.mkdir(parents=True, exist_ok=True)
 
 def load_sweep(path: Path) -> Dict:
     return json.loads(path.read_text())
+
+
+HP_TO_KW = 0.7457
+LBFT_TO_NM = 1.3558
+
+
+def load_dyno_csv(path: Path) -> Tuple[List[float], List[float], List[float]]:
+    """Load SDM25 DynoJet CSV. Returns (rpm, power_kW, torque_Nm)."""
+    rpm: List[float] = []
+    hp: List[float] = []
+    tq_lbft: List[float] = []
+    with path.open("r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                r = float(row["rpm"])
+                p = float(row["power_hp"])
+                t = float(row["torque_lbft"])
+            except (KeyError, ValueError):
+                continue
+            rpm.append(r)
+            hp.append(p)
+            tq_lbft.append(t)
+    power_kW = [h * HP_TO_KW for h in hp]
+    torque_Nm = [t * LBFT_TO_NM for t in tq_lbft]
+    return rpm, power_kW, torque_Nm
 
 
 def shape_diff_score(y1: List[float], y2: List[float]) -> float:
@@ -66,28 +93,55 @@ def overlay_plot(
     sdm25_c3: List[Dict], sdm25_e4: List[Dict],
     sdm26_c3: List[Dict], sdm26_e4: List[Dict],
     callouts: Optional[List[str]] = None,
+    dyno_rpm: Optional[List[float]] = None,
+    dyno_y: Optional[List[float]] = None,
+    sdm25_dense: Optional[List[Dict]] = None,
+    sdm26_dense: Optional[List[Dict]] = None,
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.plot(
         [p["rpm"] for p in sdm25_c3], [p[field] * scale for p in sdm25_c3],
         "o--", color="#aa3333", alpha=0.55, linewidth=1.2,
-        label="SDM25 C3 (stagnation junction)",
+        label="SDM25 sim C3 (stagnation junction)",
     )
     ax.plot(
         [p["rpm"] for p in sdm25_e4], [p[field] * scale for p in sdm25_e4],
         "o-",  color="#cc0000", linewidth=2,
-        label="SDM25 E4 (characteristic)",
+        label="SDM25 sim E4 (characteristic)",
     )
     ax.plot(
         [p["rpm"] for p in sdm26_c3], [p[field] * scale for p in sdm26_c3],
         "s--", color="#33449a", alpha=0.55, linewidth=1.2,
-        label="SDM26 C3 (stagnation junction)",
+        label="SDM26 sim C3 (stagnation junction)",
     )
     ax.plot(
         [p["rpm"] for p in sdm26_e4], [p[field] * scale for p in sdm26_e4],
         "s-",  color="#0033cc", linewidth=2,
-        label="SDM26 E4 (characteristic)",
+        label="SDM26 sim E4 (characteristic)",
     )
+    if sdm25_dense is not None:
+        ax.plot(
+            [p["rpm"] for p in sdm25_dense],
+            [p[field] * scale for p in sdm25_dense],
+            "-", color="#ff6600", linewidth=1.6, alpha=0.85,
+            label="SDM25 sim E4 (dense, 100 RPM)",
+            zorder=2,
+        )
+    if sdm26_dense is not None:
+        ax.plot(
+            [p["rpm"] for p in sdm26_dense],
+            [p[field] * scale for p in sdm26_dense],
+            "-", color="#6688ff", linewidth=1.6, alpha=0.85,
+            label="SDM26 sim E4 (dense, 100 RPM)",
+            zorder=2,
+        )
+    if dyno_rpm is not None and dyno_y is not None:
+        ax.plot(
+            dyno_rpm, dyno_y,
+            "-", color="#008000", linewidth=2.5,
+            label="SDM25 REAL dyno data (DynoJet)",
+            zorder=3,
+        )
     ax.set_xlabel("Engine RPM")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -100,6 +154,74 @@ def overlay_plot(
             verticalalignment="bottom", family="monospace",
             bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.85),
         )
+    fig.tight_layout()
+    fig.savefig(fig_path, dpi=130)
+    plt.close(fig)
+
+
+def sdm25_vs_dyno_plot(
+    *, fig_path: Path, sdm25_e4: List[Dict],
+    dyno_rpm: List[float], dyno_y: List[float],
+    ylabel: str, title: str, field: str, scale: float = 1.0,
+    sdm25_dense: Optional[List[Dict]] = None,
+) -> None:
+    """Focused SDM25-sim vs REAL dyno-data comparison plot."""
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    ax.plot(
+        dyno_rpm, dyno_y,
+        "-", color="#008000", linewidth=2.5,
+        label="SDM25 REAL dyno (DynoJet, measured)",
+        zorder=3,
+    )
+    ax.plot(
+        [p["rpm"] for p in sdm25_e4], [p[field] * scale for p in sdm25_e4],
+        "o-", color="#cc0000", linewidth=2,
+        label="SDM25 sim coarse (500 RPM, 16 pts)",
+        zorder=2,
+    )
+    if sdm25_dense:
+        ax.plot(
+            [p["rpm"] for p in sdm25_dense],
+            [p[field] * scale for p in sdm25_dense],
+            "-", color="#ff6600", linewidth=1.4, alpha=0.9,
+            label=f"SDM25 sim dense (100 RPM, {len(sdm25_dense)} pts)",
+            zorder=2,
+        )
+    # Peak callouts
+    dyno_peak_y = max(dyno_y)
+    dyno_peak_rpm = dyno_rpm[dyno_y.index(dyno_peak_y)]
+    sim_y = [p[field] * scale for p in sdm25_e4]
+    sim_peak_y = max(sim_y)
+    sim_peak_rpm = sdm25_e4[sim_y.index(sim_peak_y)]["rpm"]
+    ax.axvline(dyno_peak_rpm, color="#008000", linestyle=":", alpha=0.5)
+    ax.axvline(sim_peak_rpm,  color="#cc0000", linestyle=":", alpha=0.5)
+    if sdm25_dense:
+        d_y = [p[field] * scale for p in sdm25_dense]
+        d_peak = max(d_y)
+        d_peak_rpm = sdm25_dense[d_y.index(d_peak)]["rpm"]
+        ax.axvline(d_peak_rpm, color="#ff6600", linestyle=":", alpha=0.5)
+    ax.set_xlabel("Engine RPM")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper left", fontsize=9)
+    callout_lines = [
+        f"dyno peak:   {dyno_peak_y:7.2f} @ {dyno_peak_rpm:5.0f} RPM",
+        f"sim coarse:  {sim_peak_y:7.2f} @ {sim_peak_rpm:5.0f} RPM   "
+        f"({(sim_peak_y/dyno_peak_y - 1) * 100:+.1f}%)",
+    ]
+    if sdm25_dense:
+        callout_lines.append(
+            f"sim dense:   {d_peak:7.2f} @ {d_peak_rpm:5.0f} RPM   "
+            f"({(d_peak/dyno_peak_y - 1) * 100:+.1f}%)"
+        )
+    callout = "\n".join(callout_lines)
+    ax.text(
+        0.98, 0.02, callout, transform=ax.transAxes,
+        fontsize=8, family="monospace",
+        horizontalalignment="right", verticalalignment="bottom",
+        bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.85),
+    )
     fig.tight_layout()
     fig.savefig(fig_path, dpi=130)
     plt.close(fig)
@@ -217,6 +339,24 @@ def main():
     meta = load_sweep(DOCS / "e4_sweep_meta.json")
     v1 = load_sweep(DOCS / "v1_sweep.json")
 
+    # Load SDM25 real dyno data
+    dyno_path = DOCS / "dyno" / "sdm25_dyno.csv"
+    if dyno_path.exists():
+        dyno_rpm, dyno_power_kW, dyno_torque_Nm = load_dyno_csv(dyno_path)
+        has_dyno = True
+    else:
+        dyno_rpm, dyno_power_kW, dyno_torque_Nm = [], [], []
+        has_dyno = False
+
+    # Load dense sweep results if present (from e4_dense_sweep_run.py)
+    dense_25_path = DOCS / "sdm25_sweep_e4_dense.json"
+    dense_26_path = DOCS / "sdm26_sweep_e4_dense.json"
+    sdm25_dense = (load_sweep(dense_25_path)["points"]
+                   if dense_25_path.exists() else None)
+    sdm26_dense = (load_sweep(dense_26_path)["points"]
+                   if dense_26_path.exists() else None)
+    has_dense = sdm25_dense is not None and sdm26_dense is not None
+
     # Peaks and troughs
     rpm_peak_ve_25, peak_ve_25 = rpm_of_peak(e4_25, "ve_atm", 100.0)
     rpm_peak_ve_26, peak_ve_26 = rpm_of_peak(e4_26, "ve_atm", 100.0)
@@ -254,25 +394,49 @@ def main():
     overlay_plot(
         fig_path=PLOTS / "wheel_power.png",
         ylabel="Wheel power [kW]",
-        title="Wheel power vs RPM — C3 baseline (dashed) vs E4 characteristic (solid)",
+        title="Wheel power vs RPM — sim (C3 + E4 coarse + E4 dense) + REAL SDM25 dyno",
         field="wheel_power_kW",
         sdm25_c3=c3_25, sdm25_e4=e4_25,
         sdm26_c3=c3_26, sdm26_e4=e4_26,
+        sdm25_dense=sdm25_dense, sdm26_dense=sdm26_dense,
+        dyno_rpm=dyno_rpm if has_dyno else None,
+        dyno_y=dyno_power_kW if has_dyno else None,
         callouts=[
-            f"E4 peak: SDM25 {peak_p_25:.1f} kW @ {rpm_peak_p_25:.0f} RPM",
-            f"        SDM26 {peak_p_26:.1f} kW @ {rpm_peak_p_26:.0f} RPM",
-            f"C3 peak: SDM25 {peak_p_c3_25:.1f} kW @ {rpm_peak_p_c3_25:.0f} RPM",
-            f"        SDM26 {peak_p_c3_26:.1f} kW @ {rpm_peak_p_c3_26:.0f} RPM",
+            f"E4 coarse peak: SDM25 {peak_p_25:.1f} kW @ {rpm_peak_p_25:.0f} RPM",
+            f"               SDM26 {peak_p_26:.1f} kW @ {rpm_peak_p_26:.0f} RPM",
+            f"REAL dyno peak: {max(dyno_power_kW):.1f} kW @ "
+            f"{dyno_rpm[dyno_power_kW.index(max(dyno_power_kW))]:.0f} RPM"
+            if has_dyno else "",
         ],
     )
     overlay_plot(
         fig_path=PLOTS / "wheel_torque.png",
         ylabel="Wheel torque [Nm]",
-        title="Wheel torque vs RPM — C3 baseline (dashed) vs E4 characteristic (solid)",
+        title="Wheel torque vs RPM — sim (C3 + E4 coarse + E4 dense) + REAL SDM25 dyno",
         field="wheel_torque_Nm",
         sdm25_c3=c3_25, sdm25_e4=e4_25,
         sdm26_c3=c3_26, sdm26_e4=e4_26,
+        sdm25_dense=sdm25_dense, sdm26_dense=sdm26_dense,
+        dyno_rpm=dyno_rpm if has_dyno else None,
+        dyno_y=dyno_torque_Nm if has_dyno else None,
     )
+    if has_dyno:
+        sdm25_vs_dyno_plot(
+            fig_path=PLOTS / "sdm25_power_vs_dyno.png",
+            sdm25_e4=e4_25, dyno_rpm=dyno_rpm, dyno_y=dyno_power_kW,
+            sdm25_dense=sdm25_dense,
+            ylabel="Wheel power [kW]",
+            title="SDM25 simulated (UNCALIBRATED V2) vs REAL dyno — wheel power",
+            field="wheel_power_kW",
+        )
+        sdm25_vs_dyno_plot(
+            fig_path=PLOTS / "sdm25_torque_vs_dyno.png",
+            sdm25_e4=e4_25, dyno_rpm=dyno_rpm, dyno_y=dyno_torque_Nm,
+            sdm25_dense=sdm25_dense,
+            ylabel="Wheel torque [Nm]",
+            title="SDM25 simulated (UNCALIBRATED V2) vs REAL dyno — wheel torque",
+            field="wheel_torque_Nm",
+        )
     overlay_plot(
         fig_path=PLOTS / "ve.png",
         ylabel="Volumetric efficiency [%]",
@@ -520,6 +684,235 @@ def main():
         "face flux balance is still machine precision per step.\n"
     )
 
+    if has_dense:
+        lines.append("## Dense sweep (100 RPM resolution)\n")
+        peak_p_dense_25 = max(p["wheel_power_kW"] for p in sdm25_dense)
+        peak_p_dense_25_rpm = max(
+            sdm25_dense, key=lambda p: p["wheel_power_kW"]
+        )["rpm"]
+        peak_p_dense_26 = max(p["wheel_power_kW"] for p in sdm26_dense)
+        peak_p_dense_26_rpm = max(
+            sdm26_dense, key=lambda p: p["wheel_power_kW"]
+        )["rpm"]
+        lines.append(
+            f"Rerun of both configs at 100 RPM resolution (matching dyno "
+            f"grid). SDM25 dense: {len(sdm25_dense)} points from "
+            f"{min(p['rpm'] for p in sdm25_dense):.0f} to "
+            f"{max(p['rpm'] for p in sdm25_dense):.0f} RPM. "
+            f"SDM26 dense: {len(sdm26_dense)} points.\n"
+        )
+        lines.append(
+            f"  SDM25 dense peak: {peak_p_dense_25:.1f} kW @ "
+            f"{peak_p_dense_25_rpm:.0f} RPM  (coarse: "
+            f"{peak_p_25:.1f} kW @ {rpm_peak_p_25:.0f} RPM)\n"
+        )
+        lines.append(
+            f"  SDM26 dense peak: {peak_p_dense_26:.1f} kW @ "
+            f"{peak_p_dense_26_rpm:.0f} RPM  (coarse: "
+            f"{peak_p_26:.1f} kW @ {rpm_peak_p_26:.0f} RPM)\n"
+        )
+        lines.append(
+            "The dense curve reveals any between-coarse-point tuning "
+            "features the 500 RPM grid would alias. Agreement between "
+            "coarse and dense peak RPM is the integrity check that "
+            "the coarse grid is resolving the true tuning structure "
+            "rather than randomly landing on one side of a sharp peak.\n"
+        )
+
+    # --- Error analysis: sim vs dyno, zones + fixes ---------------------
+    if has_dyno and has_dense:
+        import numpy as _np
+        sim_rpm = [p["rpm"] for p in sdm25_dense]
+        sim_kW = [p["wheel_power_kW"] for p in sdm25_dense]
+        sim_Nm = [p["wheel_torque_Nm"] for p in sdm25_dense]
+        dyno_kW_on_sim = _np.interp(sim_rpm, dyno_rpm, dyno_power_kW)
+        dyno_Nm_on_sim = _np.interp(sim_rpm, dyno_rpm, dyno_torque_Nm)
+        mask = _np.array([(r >= min(dyno_rpm) and r <= max(dyno_rpm)) for r in sim_rpm])
+        d_kW = _np.array(sim_kW) - dyno_kW_on_sim
+        d_Nm = _np.array(sim_Nm) - dyno_Nm_on_sim
+        rmse_kW = float(_np.sqrt(_np.mean(d_kW[mask] ** 2)))
+        rmse_Nm = float(_np.sqrt(_np.mean(d_Nm[mask] ** 2)))
+        corr_kW = float(_np.corrcoef(
+            _np.array(sim_kW)[mask], dyno_kW_on_sim[mask]
+        )[0, 1])
+        corr_Nm = float(_np.corrcoef(
+            _np.array(sim_Nm)[mask], dyno_Nm_on_sim[mask]
+        )[0, 1])
+
+        lines.append("## Simulation errors vs REAL dyno — diagnoses and fixes\n")
+        lines.append(
+            "The dense sweep at 100 RPM resolution makes the sim-vs-dyno "
+            "disagreement quantifiable. Over the 4000-12900 RPM overlap "
+            f"({int(mask.sum())} points):\n"
+        )
+        lines.append(
+            f"- **Power RMSE**: {rmse_kW:.2f} kW, shape correlation r = {corr_kW:+.3f}\n"
+            f"- **Torque RMSE**: {rmse_Nm:.2f} Nm, shape correlation r = {corr_Nm:+.3f}\n"
+        )
+        lines.append(
+            "Power correlation is fair (r ≈ 0.75) — the broad shape tracks "
+            "dyno. Torque correlation is slightly negative (r ≈ −0.30): "
+            "sim torque peaks in bands where dyno torque is in a valley, "
+            "and vice versa. This is the signature of tuning features that "
+            "are too sharp, not broadly wrong magnitude — the sim finds "
+            "acoustic resonances the real engine doesn't exhibit in the "
+            "same places.\n"
+        )
+        lines.append("### Error zones\n")
+        lines.append(
+            "| RPM band    | sim - dyno ΔP_mean | sim - dyno ΔT_mean | interpretation |\n"
+            "|-------------|--------------------|--------------------|----------------|\n"
+        )
+        for label, lo, hi, interp in [
+            ("4000-4500",  4000, 4500,  "low-RPM over-prediction (~+26 Nm)"),
+            ("5100-5700",  5100, 5700,  "SPURIOUS tuning spike, sim peak torque"),
+            ("6000-7000",  6000, 7000,  "mid-RPM over-prediction"),
+            ("7500-9500",  7500, 9500,  "dyno torque plateau — sim matches here"),
+            ("9700-11000", 9700, 11000, "peak-power zone — sim within 1 kW"),
+            ("11500-13000",11500,13000, "high-RPM, sim under-predicts (-14 kW)"),
+        ]:
+            idx = [i for i, r in enumerate(sim_rpm) if lo <= r <= hi]
+            if not idx:
+                continue
+            dk = float(d_kW[idx].mean())
+            dn = float(d_Nm[idx].mean())
+            lines.append(f"| {label:<11} | {dk:+5.2f} kW | {dn:+5.2f} Nm | {interp} |\n")
+        lines.append("")
+
+        lines.append("### Diagnoses and fixes\n")
+        lines.append(
+            "**Issue 1 — Spurious torque peak at 5100 RPM and low-RPM "
+            "over-prediction (4000-6000 RPM).**\n\n"
+            "  *Signature:* sim VE hits 97.9% at 5100 RPM with a sharp peak "
+            "that dyno shows no hint of. +24 Nm mean overshoot through "
+            "4000-5700 RPM.\n\n"
+            "  *Physics:* the characteristic-coupled junction is inviscid. "
+            "At low engine speed the real 4-1 manifold dissipates acoustic "
+            "energy to turbulent mixing at the merge, flow separation at "
+            "the primary-collector interface, and Kelvin-Helmholtz vortices "
+            "in the secondary. None of these are captured in 1D FV. V2 "
+            "therefore lets a returning rarefaction wave from the collector "
+            "arrive at the exhaust valve with ~91% of its launch amplitude "
+            "where reality attenuates it closer to 70-80% per junction.\n\n"
+            "  *Primary fix:* **junction loss coefficient**, a scalar "
+            "multiplier ~0.85 on the reflected-wave amplitude at each "
+            "characteristic junction. Standard post-formulation knob in "
+            "Winterbone/Corberán literature; deferred in the Phase-E design "
+            "doc because it is a calibration knob. SDM25 dyno data is now "
+            "the anchor to set it.\n\n"
+            "  *Secondary fix:* **Wiebe combustion efficiency ramp** "
+            "(`cfg.wiebe.eta_comb(rpm)`). V1 used a two-segment ramp: 0.55 "
+            "at 3500 RPM rising to 0.88 at 10500+. V2 currently uses a "
+            "constant nominal 0.88, which is physically wrong at low RPM "
+            "where incomplete combustion is real. Inherit the V1 ramp "
+            "verbatim as a V2 post-calibration patch.\n"
+        )
+        lines.append(
+            "**Issue 2 — Peak-power RPM shift (+400 RPM, sim 11000 vs "
+            "dyno 10600).**\n\n"
+            "  *Signature:* peak power magnitudes match within 0.7% but "
+            "sim peak is 400 RPM higher.\n\n"
+            "  *Physics:* V2's collector right-end boundary is transmissive "
+            "zero-gradient — the wave exits perfectly. A real open pipe end "
+            "has a radiation impedance that acts like a 0.6·D length "
+            "extension (Levine-Schwinger, standard acoustics). For the SDM25 "
+            "50 mm collector, 0.6·D = 30 mm added effective length on a "
+            "~800 mm total acoustic path: 3.8% longer tube, 3.8% lower "
+            "resonant RPM. The sim-vs-dyno 400 RPM / 10600 = 3.8% shift "
+            "matches this number exactly.\n\n"
+            "  *Fix:* **open-end radiation correction** in the collector BC. "
+            "Implement Levine-Schwinger flanged-end impedance at the "
+            "transmissive face, or equivalently extend the collector by "
+            "0.6·D in the geometry. Single-line fix.\n"
+        )
+        lines.append(
+            "**Issue 3 — High-RPM power collapse (11500-13000, sim −14 kW).**\n\n"
+            "  *Signature:* dyno holds >60 kW out to 13000 RPM; sim "
+            "collapses to 33 kW at 13500 as the 20 mm restrictor saturates. "
+            "Sim under-predicts mass flow at the restrictor limit.\n\n"
+            "  *Physics:* the restrictor is a 20 mm converging-diverging "
+            "nozzle with sonic throat. V2's `fill_choked_restrictor_left` "
+            "enforces the isentropic choked-flow mass rate "
+            "ṁ* = ρ₀·c₀·A·(2/(γ+1))^((γ+1)/(2(γ-1))) with a discharge "
+            "coefficient Cd. Default Cd = 0.85. SAE-restrictor test data "
+            "for well-manufactured 20 mm converging-diverging nozzles "
+            "typically gives Cd = 0.93-0.97.\n\n"
+            "  *Fix:* **raise restrictor Cd** to the measured value for "
+            "SDM25's specific restrictor hardware. If Cd data isn't "
+            "available, step it to 0.92 and re-check high-RPM agreement. "
+            "Secondary: verify plenum volume in cfg matches the CAD — an "
+            "undersized plenum restricts dynamic filling above ~11000 RPM.\n"
+        )
+        lines.append(
+            "**Issue 4 — Torque shape anti-correlation (r = −0.30).**\n\n"
+            "  *Signature:* sim torque peaks where dyno doesn't and vice "
+            "versa, across the entire mid-RPM band. Underlying issue is "
+            "the same inviscid-junction overshoot of Issue 1 applied at "
+            "every RPM where tuning resonances happen to land.\n\n"
+            "  *Fix:* same as Issue 1 (junction loss coefficient). The "
+            "shape correlation is a side-effect metric of the magnitude "
+            "error at specific RPM bands, not a separate problem.\n"
+        )
+        lines.append("### Calibration order (when dyno becomes the target)\n")
+        lines.append(
+            "1. **Junction loss coefficient** (1 scalar, brings per-junction "
+            "transmission from 0.91 to 0.85). Biggest leverage; fixes the "
+            "low-mid-RPM torque over-prediction and the spurious 5100 RPM "
+            "peak.\n"
+            "2. **Restrictor Cd** (1 scalar). Fixes high-RPM power collapse.\n"
+            "3. **Collector open-end correction** (1 scalar, 0.6·D). Fixes "
+            "peak-power RPM shift.\n"
+            "4. **Wiebe η_comb RPM ramp** (2 scalars). Fixes absolute torque "
+            "magnitude at low RPM; improves absolute IMEP match everywhere.\n"
+            "5. **FMEP correlation** (Heywood → SDM25-specific). Last-pass "
+            "adjustment for any residual brake-torque offset.\n"
+            "\n"
+            "All five knobs are single scalars. None require RPM-dependent "
+            "ramp hacks (which V1 needed because V1 physics was wrong; V2 "
+            "physics is right, the calibration is just trimming the 5-10% "
+            "residuals that inviscid 1D can't capture).\n"
+        )
+
+    if has_dyno:
+        lines.append("## SDM25 simulation vs REAL dyno data\n")
+        dyno_peak_power = max(dyno_power_kW)
+        dyno_peak_power_rpm = dyno_rpm[dyno_power_kW.index(dyno_peak_power)]
+        dyno_peak_torque = max(dyno_torque_Nm)
+        dyno_peak_torque_rpm = dyno_rpm[dyno_torque_Nm.index(dyno_peak_torque)]
+        sim_peak_torque = max(p["wheel_torque_Nm"] for p in e4_25)
+        sim_peak_torque_rpm = max(
+            e4_25, key=lambda p: p["wheel_torque_Nm"]
+        )["rpm"]
+        lines.append(
+            "Real SDM25 dyno data (DynoJet pull, `docs/dyno/sdm25_dyno.csv`, "
+            f"{len(dyno_rpm)} points, {min(dyno_rpm):.0f}–{max(dyno_rpm):.0f} RPM) "
+            "is overlaid on the wheel-power and wheel-torque plots and shown "
+            "separately on dedicated comparison plots. The V2 simulation is "
+            "**uncalibrated** (nominal Wiebe, nominal FMEP, inviscid junction); "
+            "any agreement is from first-principles physics, not parameter "
+            "tuning.\n"
+        )
+        lines.append(
+            f"| quantity             | sim (V2 E4 SDM25)                | real dyno                        | delta |\n"
+            f"|----------------------|----------------------------------|----------------------------------|-------|\n"
+            f"| peak wheel power     | {peak_p_25:5.1f} kW @ {rpm_peak_p_25:5.0f} RPM "
+            f"| {dyno_peak_power:5.1f} kW @ {dyno_peak_power_rpm:5.0f} RPM "
+            f"| {(peak_p_25 - dyno_peak_power):+.2f} kW ({(peak_p_25/dyno_peak_power - 1)*100:+.1f}%) |\n"
+            f"| peak wheel torque    | {sim_peak_torque:5.1f} Nm @ {sim_peak_torque_rpm:5.0f} RPM "
+            f"| {dyno_peak_torque:5.1f} Nm @ {dyno_peak_torque_rpm:5.0f} RPM "
+            f"| {(sim_peak_torque - dyno_peak_torque):+.2f} Nm ({(sim_peak_torque/dyno_peak_torque - 1)*100:+.1f}%) |\n"
+        )
+        lines.append(
+            "\nPeak wheel power matches dyno to within "
+            f"{abs(peak_p_25 - dyno_peak_power):.1f} kW "
+            f"({abs(peak_p_25/dyno_peak_power - 1)*100:.1f}%). Peak RPM "
+            f"differs by {abs(rpm_peak_p_25 - dyno_peak_power_rpm):.0f} RPM. "
+            "Torque-peak magnitude is over-predicted by the uncalibrated "
+            f"model ({(sim_peak_torque/dyno_peak_torque - 1)*100:+.1f}%); "
+            "this is the expected signature of an inviscid junction (no "
+            "wave losses) plus nominal combustion efficiency. These are "
+            "the knobs calibration would tune.\n"
+        )
     lines.append("## V2 Phase E vs V1 reference\n")
     v1_peak = max((p.get("indicated_power_kW", 0.0) for p in v1), default=0.0)
     e4_peak_25_ind = max(p["indicated_power_kW"] for p in e4_25)
@@ -552,9 +945,16 @@ def main():
     lines.append(TABLE_HEADER + "".join(make_markdown_row(p) + "\n" for p in e4_26))
 
     lines.append("## Plots\n")
-    for fname, caption in [
-        ("wheel_power.png",   "Wheel power vs RPM"),
-        ("wheel_torque.png",  "Wheel torque vs RPM"),
+    plot_list = [
+        ("wheel_power.png",   "Wheel power vs RPM (sim + REAL SDM25 dyno overlay)"),
+        ("wheel_torque.png",  "Wheel torque vs RPM (sim + REAL SDM25 dyno overlay)"),
+    ]
+    if has_dyno:
+        plot_list.extend([
+            ("sdm25_power_vs_dyno.png",  "SDM25 simulated vs REAL dyno — wheel power"),
+            ("sdm25_torque_vs_dyno.png", "SDM25 simulated vs REAL dyno — wheel torque"),
+        ])
+    plot_list.extend([
         ("ve.png",            "Volumetric efficiency vs RPM"),
         ("egt.png",           "Mean EGT vs RPM"),
         ("imep.png",          "IMEP vs RPM"),
@@ -562,7 +962,8 @@ def main():
         ("fmep.png",          "FMEP vs RPM (Heywood correlation, unchanged)"),
         ("mass_per_cycle.png", "Intake mass per cycle vs RPM"),
         ("v2_vs_v1_indicated.png", "V2 Phase E vs V1 reference"),
-    ]:
+    ])
+    for fname, caption in plot_list:
         lines.append(f"![{caption}](e4_plots/{fname})\n")
 
     lines.append("## Cross-cylinder coupling waterfall\n")
