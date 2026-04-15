@@ -25,7 +25,10 @@ from solver.state import (
     I_RHO_A, I_MOM_A, I_E_A, I_Y_A,
 )
 from solver.muscl import muscl_hancock_step, cfl_dt, LIMITER_MINMOD
-from bcs.simple import fill_reflective_left, fill_reflective_right
+from bcs.simple import (
+    fill_reflective_left, fill_reflective_right,
+    fill_transmissive_left, fill_transmissive_right,
+)
 from bcs.junction_characteristic import (
     CharacteristicJunction, JunctionLeg, LEFT, RIGHT,
     JunctionConvergenceError,
@@ -120,8 +123,8 @@ def test_1_two_pipe_identity():
         fill_reflective_left(left)
         fill_reflective_right(right)
         junction.fill_ghosts()
-        dt_left  = cfl_dt(left.q, left.area, left.dx, GAMMA, left.n_ghost, 0.4)
-        dt_right = cfl_dt(right.q, right.area, right.dx, GAMMA, right.n_ghost, 0.4)
+        dt_left  = cfl_dt(left.q, left.area, left.dx, GAMMA, 0.4, left.n_ghost)
+        dt_right = cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost)
         dt = min(dt_left, dt_right)
         _step_pipe(left, dt)
         _step_pipe(right, dt)
@@ -214,9 +217,9 @@ def test_2_closed_domain_conservation():
         fill_reflective_right(p3)
         junction.fill_ghosts()
         dt = min(
-            cfl_dt(p1.q, p1.area, p1.dx, GAMMA, p1.n_ghost, 0.4),
-            cfl_dt(p2.q, p2.area, p2.dx, GAMMA, p2.n_ghost, 0.4),
-            cfl_dt(p3.q, p3.area, p3.dx, GAMMA, p3.n_ghost, 0.4),
+            cfl_dt(p1.q, p1.area, p1.dx, GAMMA, 0.4, p1.n_ghost),
+            cfl_dt(p2.q, p2.area, p2.dx, GAMMA, 0.4, p2.n_ghost),
+            cfl_dt(p3.q, p3.area, p3.dx, GAMMA, 0.4, p3.n_ghost),
         )
         _step_pipe(p1, dt); _step_pipe(p2, dt); _step_pipe(p3, dt)
         junction.absorb_fluxes(dt)
@@ -242,4 +245,126 @@ def test_2_closed_domain_conservation():
     )
     assert drel_MY <= 1e-12, (
         f"ρY drift: |ΔMY|/MY0 = {drel_MY:.3e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 3: two-pipe wave transmission
+# ---------------------------------------------------------------------------
+
+def _launch_acoustic_pulse(pipe, overpressure_peak, center_frac=0.25, width_cells=12):
+    """Inject a smooth *isentropic* right-traveling acoustic pulse
+    centered at ``center_frac * length`` of ``pipe``. Taper is cos²
+    over ``width_cells`` half-width cells.
+
+    Isentropic: ρ ∝ p^(1/γ). One-way (right-traveling): u = dp/(ρc).
+    This is the Riemann-invariant-preserving construction used in
+    acoustic benchmarks (Toro §14, Hirsch §21). The pulse propagates
+    rightward cleanly without spawning a contact discontinuity or a
+    left-going mirror."""
+    ng = pipe.n_ghost
+    nc = pipe.n_cells
+    center_cell = ng + int(center_frac * nc)
+    gamma = pipe.gamma
+    rho_ref = P_ATM / (R_GAS * T_ATM)
+    c_ref = float(np.sqrt(gamma * P_ATM / rho_ref))
+    for di in range(-width_cells, width_cells + 1):
+        i = center_cell + di
+        if i < ng or i >= ng + nc:
+            continue
+        A = pipe.area[i]
+        taper = np.cos(0.5 * np.pi * di / width_cells) ** 2
+        dp = overpressure_peak * taper
+        p_new = P_ATM + dp
+        rho_new = rho_ref * (p_new / P_ATM) ** (1.0 / gamma)
+        u_new = dp / (rho_ref * c_ref)   # right-traveling J+ invariant
+        E_new = p_new / (gamma - 1.0) + 0.5 * rho_new * u_new * u_new
+        pipe.q[i, I_RHO_A] = rho_new * A
+        pipe.q[i, I_MOM_A] = rho_new * u_new * A
+        pipe.q[i, I_E_A]   = E_new * A
+        pipe.q[i, I_Y_A]   = 0.0
+
+
+def _pipe_probe_pressure(pipe, frac_along):
+    """Read p at the real cell closest to ``frac_along * length``."""
+    ng = pipe.n_ghost
+    N = pipe.n_cells
+    i_real = int(frac_along * N)
+    i_real = max(0, min(N - 1, i_real))
+    i = ng + i_real
+    A = pipe.area[i]
+    rho = pipe.q[i, I_RHO_A] / A
+    u = pipe.q[i, I_MOM_A] / (rho * A)
+    E = pipe.q[i, I_E_A] / A
+    return float((pipe.gamma - 1.0) * (E - 0.5 * rho * u * u))
+
+
+def test_3_two_pipe_wave_transmission():
+    """Two identical pipes joined at a characteristic junction, open
+    (transmissive) outer ends so waves can escape. Launch a small
+    pressure pulse at the far left end of the left pipe. Measure
+    peak overpressure on each side of the junction (left pipe near
+    junction end = incident, right pipe near junction end =
+    transmitted) and verify transmission > 95%.
+
+    For identical pipes through a characteristic junction the merge
+    should be acoustically invisible. The old stagnation-CV junction
+    gives only ~69% transmission, so this test both verifies the new
+    junction works and demonstrates the reason for having it."""
+    L = 0.5
+    D = 0.04
+    N = 120
+    left  = _make_uniform_pipe(L, D, N)
+    right = _make_uniform_pipe(L, D, N)
+
+    # Launch a smooth right-traveling acoustic pulse in the interior
+    # of the left pipe. Isentropic + one-way via Riemann invariant so
+    # no spurious contact or left-moving mirror is created.
+    _launch_acoustic_pulse(left, overpressure_peak=2000.0,
+                           center_frac=0.20, width_cells=10)
+
+    legs = [JunctionLeg(left, RIGHT), JunctionLeg(right, LEFT)]
+    junction = CharacteristicJunction(
+        legs=legs, gamma=GAMMA, R_gas=R_GAS,
+    )
+
+    c0 = float(np.sqrt(GAMMA * P_ATM / (P_ATM / (R_GAS * T_ATM))))
+    t_end = 1.0 * (L + L) / c0   # one-way traverse of both pipes
+
+    # Probe right BEFORE junction (last 10% of left pipe) — incident wave.
+    # Probe right AFTER junction (first 10% of right pipe) — transmitted.
+    incident_trace = []
+    transmitted_trace = []
+
+    t = 0.0
+    while t < t_end:
+        # Outer ends open so pulse leaves after traversing.
+        fill_transmissive_left(left)
+        fill_transmissive_right(right)
+        junction.fill_ghosts()
+        dt = min(
+            cfl_dt(left.q,  left.area,  left.dx,  GAMMA, 0.4, left.n_ghost),
+            cfl_dt(right.q, right.area, right.dx, GAMMA, 0.4, right.n_ghost),
+        )
+        _step_pipe(left, dt)
+        _step_pipe(right, dt)
+        junction.absorb_fluxes(dt)
+        t += dt
+        incident_trace.append(_pipe_probe_pressure(left,  0.95))
+        transmitted_trace.append(_pipe_probe_pressure(right, 0.05))
+
+    incident_trace = np.array(incident_trace)
+    transmitted_trace = np.array(transmitted_trace)
+
+    # Peak overpressure on each side.
+    A_incident    = float(np.max(np.abs(incident_trace    - P_ATM)))
+    A_transmitted = float(np.max(np.abs(transmitted_trace - P_ATM)))
+
+    transmission = A_transmitted / A_incident
+    # Expect > 95% for identical pipes + acoustically-invisible junction.
+    # Stagnation CV gives ~0.69 per junction.
+    assert transmission > 0.95, (
+        f"two-pipe transmission = {transmission:.3f} "
+        f"(A_incident={A_incident:.2f} Pa, A_transmitted={A_transmitted:.2f} Pa). "
+        f"Expected > 0.95 for identical pipes through a characteristic junction."
     )
