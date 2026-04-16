@@ -35,33 +35,76 @@ class WiebeParams:
     duration_deg: float = 50.0         # V1 default for CBR600RR config
     spark_advance_deg: float = 25.0    # V1 default
     ignition_delay_deg: float = 7.0    # V1 default
-    eta_comb: float = 0.96             # combustion efficiency at high RPM (peak)
-    eta_comb_low: float = 0.55         # combustion efficiency at low RPM (floor)
-    eta_comb_ramp_lo: float = 3500.0   # RPM below which eta_comb = eta_comb_low
-    eta_comb_ramp_hi: float = 10500.0  # RPM above which eta_comb = eta_comb (peak)
+    eta_comb: float = 0.96             # base combustion efficiency (Wiebe model's
+                                       # theoretical maximum if everything were perfect)
     q_lhv: float = 44.0e6             # J/kg, gasoline
     afr_target: float = 13.1          # slightly rich for power
 
+    # V2 two-segment efficiency-factor ramp (Phase F4 v3, corrected).
+    #
+    # Structure: actual_eta_comb = base_efficiency × factor(RPM).
+    # Shape inherited from V1 (two-segment, knee at 6000 RPM):
+    #   steep below 6000 (poor low-RPM combustion: low turbulence,
+    #   long burn duration, wall quench) + gentle above 6000
+    #   (approaching design-point efficiency).
+    #
+    # Factor MAGNITUDES are V2-appropriate, NOT V1's values:
+    #   V1 used factor cap = 0.88 (→ peak eta = 0.845) to compensate
+    #   for V1's non-conservative MOC scheme's mass leak that
+    #   artificially inflated cylinder charge at high RPM.
+    #   V2 is conservation-correct to machine precision and does NOT
+    #   need V1's peak derating. V2's Phase E demonstrated +0.7%
+    #   peak-power match vs SDM25 dyno at eta_comb = 0.96 constant
+    #   (first-principles, not fitted), so the peak factor is 1.00.
+    #
+    # The low-RPM factors (0.70, 0.85) are calibrated against the
+    # observed Phase E over-prediction pattern (+23 Nm mean in the
+    # 4000-5700 RPM band). These are engineering estimates within the
+    # physically-plausible range, not optimization results.
+    #
+    # Iteration history:
+    #   v1 (rejected): 0.55 → 0.96 single-segment. Implicitly fitted.
+    #   v2 (rejected): V1 exact 0.55/0.80/0.88 × 0.96. -17% peak.
+    #   v3 (this): V1 shape, V2 magnitudes 0.70/0.85/1.00 × 0.96.
+    _factor_rpm_lo: float = 3500.0     # below this: factor = _factor_lo
+    _factor_rpm_knee: float = 6000.0   # knee between steep and gentle segments
+    _factor_rpm_hi: float = 10500.0    # above this: factor = _factor_hi
+    _factor_lo: float = 0.70           # V2: less derating than V1's 0.55
+    _factor_knee: float = 0.85         # V2: less derating than V1's 0.80
+    _factor_hi: float = 1.00           # V2: no peak derating (V1 was 0.88)
+
     def eta_comb_at_rpm(self, rpm: float) -> float:
-        """RPM-dependent combustion efficiency (Phase F4).
+        """RPM-dependent combustion efficiency with V2-appropriate
+        factor values applied to the base eta_comb.
 
-        Linear ramp from ``eta_comb_low`` at ``eta_comb_ramp_lo`` RPM
-        to ``eta_comb`` at ``eta_comb_ramp_hi`` RPM. Captures real
-        combustion incompleteness at low RPM where the flame has more
-        time to quench against cylinder walls and mixture preparation
-        is poorer.
+        Two-segment piecewise linear on the efficiency_factor:
+          RPM <= 3500:          factor = 0.70
+          3500 < RPM <= 6000:   linear 0.70 -> 0.85  (steep segment)
+          6000 < RPM <= 10500:  linear 0.85 -> 1.00  (gentle segment)
+          RPM > 10500:          factor = 1.00  (no derating at peak)
 
-        Inherited from V1's calibration ramp (0.55 @ 3500 → 0.88 @ 10500+,
-        but V2 default peak eta = 0.96 per the Phase 1 audit).
+        Resulting actual_eta_comb = base (0.96) x factor:
+          3500 RPM:  0.96 x 0.70 = 0.672
+          6000 RPM:  0.96 x 0.85 = 0.816
+          10500 RPM: 0.96 x 1.00 = 0.960
+          13500 RPM: 0.96 x 1.00 = 0.960
 
-        Reference: Heywood 1988 §9 on combustion efficiency correlations.
+        Shape from V1 orchestrator.py:267-276. Factor magnitudes
+        calibrated for V2's conservation-correct physics (V1's 0.88
+        cap compensated for V1's mass leak; V2 does not have that leak).
+        Reference: Heywood 1988 S9 on combustion efficiency correlations.
         """
-        if rpm <= self.eta_comb_ramp_lo:
-            return self.eta_comb_low
-        if rpm >= self.eta_comb_ramp_hi:
-            return self.eta_comb
-        frac = (rpm - self.eta_comb_ramp_lo) / (self.eta_comb_ramp_hi - self.eta_comb_ramp_lo)
-        return self.eta_comb_low + frac * (self.eta_comb - self.eta_comb_low)
+        if rpm <= self._factor_rpm_lo:
+            factor = self._factor_lo
+        elif rpm <= self._factor_rpm_knee:
+            frac = (rpm - self._factor_rpm_lo) / (self._factor_rpm_knee - self._factor_rpm_lo)
+            factor = self._factor_lo + frac * (self._factor_knee - self._factor_lo)
+        elif rpm <= self._factor_rpm_hi:
+            frac = (rpm - self._factor_rpm_knee) / (self._factor_rpm_hi - self._factor_rpm_knee)
+            factor = self._factor_knee + frac * (self._factor_hi - self._factor_knee)
+        else:
+            factor = self._factor_hi
+        return self.eta_comb * factor
 
     @property
     def theta_start(self) -> float:
