@@ -839,27 +839,37 @@ def _a3_style_run(K_in, K_out, p_cyl_peak_bar=1.05):
              "S0": S[0], "S1": S[1], "C": C}
     for p in pipes.values():
         ensure_scratch(p)
+    # Junctions with role-classified legs (Phase F1 refactor).
     js = [
         CharacteristicJunction(
-            legs=[JunctionLeg(P[0], RIGHT), JunctionLeg(P[3], RIGHT),
-                  JunctionLeg(S[0], LEFT)],
+            legs=[
+                JunctionLeg(P[0], RIGHT, role="incoming"),
+                JunctionLeg(P[3], RIGHT, role="incoming"),
+                JunctionLeg(S[0], LEFT,  role="outgoing"),
+            ],
             gamma=GAMMA_AH, R_gas=R_AIR_AH,
-            K_incoming=[K_in, K_in, K_out],
-            K_outgoing=[K_out, K_out, K_in],
+            K_incoming=[K_in, K_in],
+            K_outgoing=[K_out],
         ),
         CharacteristicJunction(
-            legs=[JunctionLeg(P[1], RIGHT), JunctionLeg(P[2], RIGHT),
-                  JunctionLeg(S[1], LEFT)],
+            legs=[
+                JunctionLeg(P[1], RIGHT, role="incoming"),
+                JunctionLeg(P[2], RIGHT, role="incoming"),
+                JunctionLeg(S[1], LEFT,  role="outgoing"),
+            ],
             gamma=GAMMA_AH, R_gas=R_AIR_AH,
-            K_incoming=[K_in, K_in, K_out],
-            K_outgoing=[K_out, K_out, K_in],
+            K_incoming=[K_in, K_in],
+            K_outgoing=[K_out],
         ),
         CharacteristicJunction(
-            legs=[JunctionLeg(S[0], RIGHT), JunctionLeg(S[1], RIGHT),
-                  JunctionLeg(C,    LEFT)],
+            legs=[
+                JunctionLeg(S[0], RIGHT, role="incoming"),
+                JunctionLeg(S[1], RIGHT, role="incoming"),
+                JunctionLeg(C,    LEFT,  role="outgoing"),
+            ],
             gamma=GAMMA_AH, R_gas=R_AIR_AH,
-            K_incoming=[K_in, K_in, K_out],
-            K_outgoing=[K_out, K_out, K_in],
+            K_incoming=[K_in, K_in],
+            K_outgoing=[K_out],
         ),
     ]
     P0 = pipes["P0"]; C = pipes["C"]

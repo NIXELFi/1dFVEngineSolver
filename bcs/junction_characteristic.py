@@ -54,7 +54,7 @@ LeVeque, "Finite Volume Methods for Hyperbolic Problems," 2002.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -92,14 +92,33 @@ class JunctionLeg:
     means flow *into* the junction, ``sign_into = +1``. RIGHT-end legs
     default to +1 (u>0 at pipe right-end goes out of pipe into
     junction), LEFT-end legs default to −1.
+
+    Phase F1 adds a ``role`` field that classifies the leg as
+    "incoming" (a primary in a merge, geometrically feeds fluid
+    INTO the junction during the dominant flow direction) or
+    "outgoing" (a secondary/collector downstream of the merge,
+    receives fluid FROM the junction). The role is used to look up
+    the appropriate loss coefficient from the parent junction's
+    K_incoming / K_outgoing arrays. The role is *geometric*
+    (constant over the simulation), not flow-direction-dependent —
+    a primary leg carrying a return wave is still an "incoming"
+    leg geometrically. The Corberán loss magnitude applies with
+    the geometric K; the direction sign flips with the
+    instantaneous u direction in the inner solve (eq. 2).
     """
     state: PipeState
     end: str                  # "left" or "right"
+    role: str = "incoming"    # "incoming" or "outgoing" (Phase F1)
     sign_into: int = 0
 
     def __post_init__(self) -> None:
         if self.sign_into == 0:
             self.sign_into = +1 if self.end == RIGHT else -1
+        if self.role not in ("incoming", "outgoing"):
+            raise ValueError(
+                f"JunctionLeg role must be 'incoming' or 'outgoing', "
+                f"got {self.role!r}"
+            )
 
     @property
     def face_cell_index(self) -> int:
@@ -287,19 +306,21 @@ def _solve_inner_u_face(
                     float, float, float, float],
     reference: Tuple[float, float, float, float],
     p0_junction: float,
-    K_in: float,
-    K_out: float,
+    K_leg: float,
     tol: float = 1e-10,
     max_iter: int = 40,
 ) -> Tuple[float, float, float, float, bool, int]:
     """Per-leg inner secant solve for u_face, given the junction
-    stagnation pressure p0_junction and the leg's K coefficients.
+    stagnation pressure p0_junction and the leg's K coefficient.
 
     Iterates on u_face such that the Corberán loss relation is satisfied:
         p_0,face = p_face + ½ρ_face·u_face²
-        p_0,face = p_0,junction + sign(σ·u_face) · K_eff · ½ρ_face·u_face²
+        p_0,face = p_0,junction + sign(σ·u_face) · K_leg · ½ρ_face·u_face²
 
-    with K_eff = K_in if σ·u_face > 0 (inflow into junction), else K_out.
+    ``K_leg`` is the leg's geometric loss coefficient. The direction
+    sign is applied based on the instantaneous u direction; the K
+    magnitude itself is direction-independent (simplified model,
+    see design doc §2c).
 
     Returns (rho_f, u_f, p_f, c_f, converged, niter).
     """
@@ -329,10 +350,10 @@ def _solve_inner_u_face(
         rho_f, p_f, c_f = fs
         dyn_head = 0.5 * rho_f * u_face * u_face
         p0_face = p_f + dyn_head
-        # Direction at the face: inflow = flow into junction = σ·u > 0
-        K_eff = K_in if sigma * u_face > 0.0 else K_out
+        # Direction sign: inflow (σ·u > 0) gives +K loss, outflow −K.
+        # Magnitude K is direction-independent (geometric only).
         direction_sign = 1.0 if sigma * u_face > 0.0 else -1.0
-        p0_face_expected = p0_junction + direction_sign * K_eff * dyn_head
+        p0_face_expected = p0_junction + direction_sign * K_leg * dyn_head
         return p0_face - p0_face_expected
 
     # Initial guess: u_face = interior u, perturbed by +1 m/s for secant prime
@@ -395,13 +416,15 @@ def _corberan_mass_residual(
     p0_junction: float,
     references: List[Tuple[float, float, float, float]],
     dt: float,
-    K_incoming: List[float],
-    K_outgoing: List[float],
+    K_per_leg: List[float],
 ) -> Tuple[float, List[Tuple[float, float, float, float]], int, float]:
-    """Corberán mass residual: for each leg, inner-solve for u_face given
-    p_0_junction and the leg's K coefficients; then evaluate the
-    HLLC-consistent, MUSCL-aware face flux. Sum σ_i · F_mass · A_i
-    across legs.
+    """Corberán mass residual: for each leg, inner-solve for u_face
+    given p_0_junction and the leg's single K coefficient; then
+    evaluate the HLLC-consistent, MUSCL-aware face flux. Sum
+    σ_i · F_mass · A_i across legs.
+
+    ``K_per_leg[i]`` is the leg's geometric loss coefficient (already
+    resolved by role in CharacteristicJunction.__post_init__).
 
     Returns (R, face_states, inner_iter_max, energy_dissipation_W).
     face_states[i] = (ρ_ghost, u_ghost, p_ghost, F_mass_leg_i) to match
@@ -415,10 +438,9 @@ def _corberan_mass_residual(
         (rho_i, u_i, p_i, Y_i, c_i, A_i, gamma_leg,
          rho_in, u_in, p_in, rhoY_in) = interior
 
-        K_in = K_incoming[i]
-        K_out = K_outgoing[i]
+        K_leg = K_per_leg[i]
         rho_g, u_g, p_g, c_g, conv, niter = _solve_inner_u_face(
-            leg, interior, ref, p0_junction, K_in, K_out,
+            leg, interior, ref, p0_junction, K_leg,
         )
         if niter > inner_iter_max:
             inner_iter_max = niter
@@ -445,10 +467,9 @@ def _corberan_mass_residual(
         F_mass = F[0]
         R += leg.sign_into * F_mass * A_i
 
-        # Energy dissipation diagnostic: K · ½ρu³ · A · sign
-        sigma = leg.sign_into
-        K_eff = K_in if sigma * u_g > 0.0 else K_out
-        energy_loss_W += K_eff * 0.5 * rho_g * u_g * u_g * abs(u_g) * A_i
+        # Energy dissipation diagnostic: |K| · ½ρu³ · A (magnitude,
+        # direction-independent; positive by construction).
+        energy_loss_W += K_leg * 0.5 * rho_g * u_g * u_g * abs(u_g) * A_i
 
         face_states.append((rho_g, u_g, p_g, F_mass))
     return R, face_states, inner_iter_max, energy_loss_W
@@ -568,13 +589,19 @@ class CharacteristicJunction:
     newton_max_iter: int = 30
     choke_margin: float = 0.02      # |M| < 1 − margin counts as subsonic
 
-    # Phase F1 — Corberán loss coefficients (K = 0 default = Phase-E
-    # fast path with exact bit-for-bit backward compatibility).
-    # K_incoming[i] applies on leg i when σ_i · u_face,i > 0 (inflow
-    # INTO the junction). K_outgoing[i] applies when σ_i · u_face,i < 0
-    # (outflow FROM the junction). Typical published values for
-    # sharp-edged merges: K_in ≈ 0.3–0.6, K_out ≈ 0.05–0.2
-    # (Winterbone & Pearson 1999 ch. 9; Corberán & Gascón 1995 IJTS).
+    # Phase F1 — Corberán loss coefficients. K = 0 → Phase-E fast
+    # path with exact bit-for-bit backward compatibility.
+    # K_incoming has length = count of legs with role="incoming"
+    # (geometric inflow, e.g. a primary in a merge).
+    # K_outgoing has length = count of legs with role="outgoing"
+    # (geometric outflow, e.g. a secondary / collector downstream).
+    # Typical published values for sharp-edged merges:
+    #   K_in ≈ 0.3-0.6 (merge direction losses)
+    #   K_out ≈ 0.05-0.2 (split / expansion direction losses)
+    # References: Winterbone & Pearson 1999 ch. 9, Corberán & Gascón
+    # 1995 IJTS. Direction sign in the loss term follows the
+    # instantaneous u direction in the inner solve (eq. 2 in the
+    # design doc).
     K_incoming: List[float] = field(default_factory=list)
     K_outgoing: List[float] = field(default_factory=list)
 
@@ -595,31 +622,46 @@ class CharacteristicJunction:
     last_y_mixed: float = 0.0
 
     def __post_init__(self) -> None:
-        n_legs = len(self.legs)
+        n_in  = sum(1 for L in self.legs if L.role == "incoming")
+        n_out = sum(1 for L in self.legs if L.role == "outgoing")
         if not self.K_incoming:
-            self.K_incoming = [0.0] * n_legs
+            self.K_incoming = [0.0] * n_in
         if not self.K_outgoing:
-            self.K_outgoing = [0.0] * n_legs
-        if len(self.K_incoming) != n_legs:
+            self.K_outgoing = [0.0] * n_out
+        if len(self.K_incoming) != n_in:
             raise ValueError(
-                f"K_incoming has length {len(self.K_incoming)}, "
-                f"expected {n_legs} (= len(legs))"
+                f"K_incoming has length {len(self.K_incoming)}, expected "
+                f"{n_in} (= count of legs with role='incoming')"
             )
-        if len(self.K_outgoing) != n_legs:
+        if len(self.K_outgoing) != n_out:
             raise ValueError(
-                f"K_outgoing has length {len(self.K_outgoing)}, "
-                f"expected {n_legs} (= len(legs))"
+                f"K_outgoing has length {len(self.K_outgoing)}, expected "
+                f"{n_out} (= count of legs with role='outgoing')"
             )
-        for k in self.K_incoming + self.K_outgoing:
+        for k in list(self.K_incoming) + list(self.K_outgoing):
             if k < 0.0:
                 raise ValueError(f"K coefficients must be ≥ 0, got {k}")
+
+        # Precompute per-leg K (geometric lookup: each leg has ONE K
+        # value determined by its role; direction sign is applied in
+        # the inner solve based on the instantaneous u).
+        self._K_per_leg: List[float] = []
+        in_idx = 0
+        out_idx = 0
+        for L in self.legs:
+            if L.role == "incoming":
+                self._K_per_leg.append(self.K_incoming[in_idx])
+                in_idx += 1
+            else:
+                self._K_per_leg.append(self.K_outgoing[out_idx])
+                out_idx += 1
 
     @property
     def _uses_corberan(self) -> bool:
         """True if any K is nonzero — selects the Corberán code path.
         False → Phase-E constant-static-pressure fast path (exact
         bit-for-bit equality with pre-F1 behavior)."""
-        return any(k > 0.0 for k in self.K_incoming + self.K_outgoing)
+        return any(k > 0.0 for k in self._K_per_leg)
 
     # --- lifecycle ------------------------------------------------------
 
@@ -765,7 +807,7 @@ class CharacteristicJunction:
 
         R0, fs0, ii0, eW0 = _corberan_mass_residual(
             self.legs, interiors, p0_j, references, dt,
-            self.K_incoming, self.K_outgoing,
+            self._K_per_leg,
         )
         self.last_mass_residual = R0
         if abs(R0) < self.newton_tol:
@@ -775,7 +817,7 @@ class CharacteristicJunction:
         p_curr = p0_j + dp_fd
         R_curr, fs_curr, ii_curr, eW_curr = _corberan_mass_residual(
             self.legs, interiors, p_curr, references, dt,
-            self.K_incoming, self.K_outgoing,
+            self._K_per_leg,
         )
 
         for it in range(self.newton_max_iter):
@@ -795,7 +837,7 @@ class CharacteristicJunction:
             p_next = max(p_curr + dp, p_floor)
             R_next, fs_next, ii_next, eW_next = _corberan_mass_residual(
                 self.legs, interiors, p_next, references, dt,
-                self.K_incoming, self.K_outgoing,
+                self._K_per_leg,
             )
             p_prev, R_prev = p_curr, R_curr
             p_curr, R_curr, fs_curr = p_next, R_next, fs_next
@@ -1160,6 +1202,8 @@ def make_junction(
     p_init: float = 101325.0,
     T_init: float = 300.0,
     Y_init: float = 0.0,
+    K_incoming: Optional[List[float]] = None,
+    K_outgoing: Optional[List[float]] = None,
 ):
     """Factory returning either a JunctionCV (stagnation, default) or a
     CharacteristicJunction. Both expose the same fill_ghosts /
@@ -1168,8 +1212,9 @@ def make_junction(
     - junction_type="stagnation" → bcs.junction_cv.JunctionCV
     - junction_type="characteristic" → CharacteristicJunction
 
-    Leg types differ: JunctionCV wants JunctionCVLeg, this module wants
-    JunctionLeg. The factory handles the conversion when needed.
+    ``K_incoming`` and ``K_outgoing`` (optional): Corberán loss
+    coefficients, length-matched to role counts on ``legs``.
+    Only consumed by the "characteristic" branch.
     """
     if junction_type == "stagnation":
         # Late import to avoid circularity at module load.
@@ -1183,6 +1228,8 @@ def make_junction(
     if junction_type == "characteristic":
         return CharacteristicJunction(
             legs=legs, gamma=gamma, R_gas=R_gas,
+            K_incoming=K_incoming or [],
+            K_outgoing=K_outgoing or [],
         )
     raise ValueError(
         f"unknown junction_type {junction_type!r}; "
