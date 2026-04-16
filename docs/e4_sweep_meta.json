@@ -1,0 +1,32 @@
+{
+  "branch": "phase-e/junction-coupling",
+  "junction_type": "characteristic",
+  "sdm25_total_wall_s": 176.51333284378052,
+  "sdm26_total_wall_s": 268.6987497806549,
+  "sdm25_max_nonconservation": 5.530789119821472e-06,
+  "sdm26_max_nonconservation": 1.2423165201621168e-06,
+  "egt_band_K": [
+    700.0,
+    1600.0
+  ],
+  "egt_band_note": "valve-face, updated 2026-04-14 per Phase E review",
+  "nc_max_per_cycle_kg": 1e-05,
+  "rpms": [
+    6000.0,
+    6500.0,
+    7000.0,
+    7500.0,
+    8000.0,
+    8500.0,
+    9000.0,
+    9500.0,
+    10000.0,
+    10500.0,
+    11000.0,
+    11500.0,
+    12000.0,
+    12500.0,
+    13000.0,
+    13500.0
+  ]
+}

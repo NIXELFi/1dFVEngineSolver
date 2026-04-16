@@ -1,0 +1,10 @@
+Phase E2 — A3 manifold comparison: CharacteristicJunction
+============================================================
+
+Baseline numbers for comparison:
+  JunctionCV (C3):        linear=+0.228, nominal=+0.011
+  Draft bcs/junction.py:  linear=+0.698, nominal=-0.042
+
+CharacteristicJunction (Phase E2):
+  linear +5 kPa : R_round_trip = +0.7484  (peak +0.4644)
+  nominal 5 bar : R_round_trip = -0.0621  (peak -0.0772)

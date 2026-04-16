@@ -187,12 +187,13 @@ class CylinderModel:
         )
         dQht_dt = h_c * A_surf * (st.T - ws.T_wall)
 
-        # Combustion heat release
+        # Combustion heat release (Phase F4: RPM-dependent eta_comb)
+        eta = w.eta_comb_at_rpm(rpm)
         dQcomb_dt = 0.0
         if is_combusting(theta_local, w.theta_start, w.duration_deg) and st.m_fuel > 0.0:
             dxb_dtheta = wiebe_burn_rate(theta_local, w.a, w.m, w.theta_start, w.duration_deg)
             dxb_dt = dxb_dtheta * 180.0 / np.pi * omega  # 1/s
-            dQcomb_dt = w.eta_comb * st.m_fuel * w.q_lhv * dxb_dt
+            dQcomb_dt = eta * st.m_fuel * w.q_lhv * dxb_dt
             st.x_b = wiebe_xb(theta_local, w.a, w.m, w.theta_start, w.duration_deg)
 
         if phase == 0:
@@ -244,7 +245,7 @@ class CylinderModel:
                 if is_combusting(th, w.theta_start, w.duration_deg) and st.m_fuel > 0.0:
                     dxb_dth = wiebe_burn_rate(th, w.a, w.m, w.theta_start, w.duration_deg)
                     # dxb per degree → per radian
-                    dQcomb_local = w.eta_comb * st.m_fuel * w.q_lhv * dxb_dth * (180.0 / np.pi)
+                    dQcomb_local = eta * st.m_fuel * w.q_lhv * dxb_dth * (180.0 / np.pi)
                 if Vl < 1e-20:
                     return 0.0
                 return -gamma * (p_local / Vl) * dVl_dth_rad + (gamma - 1.0) / Vl * (dQcomb_local - dQht)

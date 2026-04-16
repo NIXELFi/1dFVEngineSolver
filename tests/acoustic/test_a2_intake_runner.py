@@ -140,7 +140,7 @@ def run_a2(
     else:
         raise ValueError(f"far_end_bc must be 'plenum' or 'wall', got {far_end_bc!r}")
 
-    def bc_apply(t: float) -> None:
+    def bc_apply(t: float, dt: float) -> None:
         _fill_left(t)
         p_cyl = p_trough if t < T_PULSE_S else P_ATM
         fill_valve_ghost(
