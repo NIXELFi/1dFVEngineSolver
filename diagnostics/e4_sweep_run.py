@@ -35,7 +35,7 @@ import bcs.valve
 RPMS = [6000.0 + 500.0 * i for i in range(16)]
 N_CYCLES_MAX = 40
 
-EGT_BAND = (1000.0, 1500.0)           # K, valve-face. Widened low end
+EGT_BAND = (700.0, 1600.0)            # K, valve-face. Widened for F4
                                       # to 1000 K after observing the
                                       # low-RPM end of the sweep has
                                       # EGT drifting down (less
