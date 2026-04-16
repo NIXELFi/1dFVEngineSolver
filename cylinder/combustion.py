@@ -35,9 +35,33 @@ class WiebeParams:
     duration_deg: float = 50.0         # V1 default for CBR600RR config
     spark_advance_deg: float = 25.0    # V1 default
     ignition_delay_deg: float = 7.0    # V1 default
-    eta_comb: float = 0.96             # combustion efficiency — physics, NOT a cap
-    q_lhv: float = 44.0e6              # J/kg, gasoline
-    afr_target: float = 13.1           # slightly rich for power
+    eta_comb: float = 0.96             # combustion efficiency at high RPM (peak)
+    eta_comb_low: float = 0.55         # combustion efficiency at low RPM (floor)
+    eta_comb_ramp_lo: float = 3500.0   # RPM below which eta_comb = eta_comb_low
+    eta_comb_ramp_hi: float = 10500.0  # RPM above which eta_comb = eta_comb (peak)
+    q_lhv: float = 44.0e6             # J/kg, gasoline
+    afr_target: float = 13.1          # slightly rich for power
+
+    def eta_comb_at_rpm(self, rpm: float) -> float:
+        """RPM-dependent combustion efficiency (Phase F4).
+
+        Linear ramp from ``eta_comb_low`` at ``eta_comb_ramp_lo`` RPM
+        to ``eta_comb`` at ``eta_comb_ramp_hi`` RPM. Captures real
+        combustion incompleteness at low RPM where the flame has more
+        time to quench against cylinder walls and mixture preparation
+        is poorer.
+
+        Inherited from V1's calibration ramp (0.55 @ 3500 → 0.88 @ 10500+,
+        but V2 default peak eta = 0.96 per the Phase 1 audit).
+
+        Reference: Heywood 1988 §9 on combustion efficiency correlations.
+        """
+        if rpm <= self.eta_comb_ramp_lo:
+            return self.eta_comb_low
+        if rpm >= self.eta_comb_ramp_hi:
+            return self.eta_comb
+        frac = (rpm - self.eta_comb_ramp_lo) / (self.eta_comb_ramp_hi - self.eta_comb_ramp_lo)
+        return self.eta_comb_low + frac * (self.eta_comb - self.eta_comb_low)
 
     @property
     def theta_start(self) -> float:
