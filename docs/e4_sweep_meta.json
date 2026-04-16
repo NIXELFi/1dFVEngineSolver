@@ -1,8 +1,8 @@
 {
   "branch": "phase-e/junction-coupling",
   "junction_type": "characteristic",
-  "sdm25_total_wall_s": 176.51333284378052,
-  "sdm26_total_wall_s": 268.6987497806549,
+  "sdm25_total_wall_s": 169.08204817771912,
+  "sdm26_total_wall_s": 265.6000130176544,
   "sdm25_max_nonconservation": 5.530789119821472e-06,
   "sdm26_max_nonconservation": 1.2423165201621168e-06,
   "egt_band_K": [

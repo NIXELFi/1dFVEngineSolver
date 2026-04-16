@@ -40,51 +40,59 @@ class WiebeParams:
     q_lhv: float = 44.0e6             # J/kg, gasoline
     afr_target: float = 13.1          # slightly rich for power
 
-    # V1 two-segment efficiency-factor ramp (Phase F4 corrected).
-    # V1 source: orchestrator.py:267-276, calibrated against SDM25
-    # DynoJet data May 2025.
+    # V2 two-segment efficiency-factor ramp (Phase F4 v3, corrected).
     #
-    # V1 uses: actual_eta_comb = base_efficiency × efficiency_factor(RPM)
-    # where base_efficiency = 0.96 (from CombustionConfig) and the factor
-    # acknowledges that the Wiebe model itself has deficiencies (wave speed
-    # error in V1's MOC, sin² cam profile approximation). The factor cap
-    # at 0.88 means peak actual eta_comb = 0.96 × 0.88 = 0.845.
+    # Structure: actual_eta_comb = base_efficiency × factor(RPM).
+    # Shape inherited from V1 (two-segment, knee at 6000 RPM):
+    #   steep below 6000 (poor low-RPM combustion: low turbulence,
+    #   long burn duration, wall quench) + gentle above 6000
+    #   (approaching design-point efficiency).
     #
-    # V2 inherits V1's factor ramp AND V1's base (0.96) per review
-    # decision (Option C). Caveat: V1's derating factor was calibrated
-    # for V1's specific model deficiencies, which differ from V2's
-    # (V2 has correct wave speed via HLLC-FV, better cam profiles, but
-    # has inviscid junction over-prediction and frozen gamma). The net
-    # effect of inheriting V1's factor is that V2 systematically
-    # under-predicts peak power by ~10-12% vs SDM25 dyno. This is
-    # honest and documented; future V2-specific calibration of the
-    # base_efficiency or the factor cap would address it.
-    _factor_rpm_lo: float = 3500.0     # below this: factor = 0.55
+    # Factor MAGNITUDES are V2-appropriate, NOT V1's values:
+    #   V1 used factor cap = 0.88 (→ peak eta = 0.845) to compensate
+    #   for V1's non-conservative MOC scheme's mass leak that
+    #   artificially inflated cylinder charge at high RPM.
+    #   V2 is conservation-correct to machine precision and does NOT
+    #   need V1's peak derating. V2's Phase E demonstrated +0.7%
+    #   peak-power match vs SDM25 dyno at eta_comb = 0.96 constant
+    #   (first-principles, not fitted), so the peak factor is 1.00.
+    #
+    # The low-RPM factors (0.70, 0.85) are calibrated against the
+    # observed Phase E over-prediction pattern (+23 Nm mean in the
+    # 4000-5700 RPM band). These are engineering estimates within the
+    # physically-plausible range, not optimization results.
+    #
+    # Iteration history:
+    #   v1 (rejected): 0.55 → 0.96 single-segment. Implicitly fitted.
+    #   v2 (rejected): V1 exact 0.55/0.80/0.88 × 0.96. -17% peak.
+    #   v3 (this): V1 shape, V2 magnitudes 0.70/0.85/1.00 × 0.96.
+    _factor_rpm_lo: float = 3500.0     # below this: factor = _factor_lo
     _factor_rpm_knee: float = 6000.0   # knee between steep and gentle segments
-    _factor_rpm_hi: float = 10500.0    # above this: factor = 0.88 (capped)
-    _factor_lo: float = 0.55           # factor at and below _factor_rpm_lo
-    _factor_knee: float = 0.80         # factor at _factor_rpm_knee
-    _factor_hi: float = 0.88           # factor at and above _factor_rpm_hi (cap)
+    _factor_rpm_hi: float = 10500.0    # above this: factor = _factor_hi
+    _factor_lo: float = 0.70           # V2: less derating than V1's 0.55
+    _factor_knee: float = 0.85         # V2: less derating than V1's 0.80
+    _factor_hi: float = 1.00           # V2: no peak derating (V1 was 0.88)
 
     def eta_comb_at_rpm(self, rpm: float) -> float:
-        """RPM-dependent combustion efficiency — V1's exact two-segment
-        factor ramp applied to the base eta_comb.
+        """RPM-dependent combustion efficiency with V2-appropriate
+        factor values applied to the base eta_comb.
 
         Two-segment piecewise linear on the efficiency_factor:
-          RPM ≤ 3500:          factor = 0.55  (poor low-RPM combustion)
-          3500 < RPM ≤ 6000:   linear 0.55 → 0.80  (steep improvement)
-          6000 < RPM ≤ 10500:  linear 0.80 → 0.88  (gentle plateau)
-          RPM > 10500:         factor = 0.88  (capped at design point)
+          RPM <= 3500:          factor = 0.70
+          3500 < RPM <= 6000:   linear 0.70 -> 0.85  (steep segment)
+          6000 < RPM <= 10500:  linear 0.85 -> 1.00  (gentle segment)
+          RPM > 10500:          factor = 1.00  (no derating at peak)
 
-        actual_eta_comb = base_eta_comb × factor
+        Resulting actual_eta_comb = base (0.96) x factor:
+          3500 RPM:  0.96 x 0.70 = 0.672
+          6000 RPM:  0.96 x 0.85 = 0.816
+          10500 RPM: 0.96 x 1.00 = 0.960
+          13500 RPM: 0.96 x 1.00 = 0.960
 
-        Resulting values at key RPMs:
-          3500 RPM:  0.96 × 0.55 = 0.528
-          6000 RPM:  0.96 × 0.80 = 0.768
-          10500 RPM: 0.96 × 0.88 = 0.845
-
-        Source: V1 orchestrator.py:267-276, DynoJet calibration May 2025.
-        Reference: Heywood 1988 §9 on combustion efficiency correlations.
+        Shape from V1 orchestrator.py:267-276. Factor magnitudes
+        calibrated for V2's conservation-correct physics (V1's 0.88
+        cap compensated for V1's mass leak; V2 does not have that leak).
+        Reference: Heywood 1988 S9 on combustion efficiency correlations.
         """
         if rpm <= self._factor_rpm_lo:
             factor = self._factor_lo
