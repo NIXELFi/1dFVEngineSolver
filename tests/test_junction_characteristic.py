@@ -915,6 +915,7 @@ def _a3_style_run(K_in, K_out, p_cyl_peak_bar=1.05):
     return (A2 / A1 if abs(A1) > 1e-20 else float("nan"), max_loss[0])
 
 
+@pytest.mark.skip(reason="Corberán reformulation reverted (Phase F1); tests preserved for future Phase G")
 def test_10_K_zero_exact_reduction():
     """Test 10 (F1): K = 0 reduction to Phase-E constant-static-pressure.
 
@@ -939,6 +940,7 @@ def test_10_K_zero_exact_reduction():
     )
 
 
+@pytest.mark.skip(reason="Corberán reformulation reverted (Phase F1); tests preserved for future Phase G")
 def test_11_K_scaling_monotonic():
     """Test 11 (F1): R_round_trip decreases monotonically as K_in
     increases. For a fixed K_out / K_in ratio = 0.25 (approximate
@@ -967,6 +969,7 @@ def test_11_K_scaling_monotonic():
     )
 
 
+@pytest.mark.skip(reason="Corberán reformulation reverted (Phase F1); tests preserved for future Phase G")
 def test_12_K_asymmetry():
     """Test 12 (F1): K asymmetry. Run A3 with the Winterbone-typical
     asymmetry K_in = 0.4, K_out = 0.1. Verify:

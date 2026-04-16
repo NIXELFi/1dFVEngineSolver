@@ -1,6 +1,38 @@
 # Phase F1a — Corberán loss-coefficient junction: design document
 
-**Status:** draft for review. No implementation code written. F1 attempts
+## Status: REVERTED (2026-04-15)
+
+**The Corberán reformulation was implemented correctly but does not
+serve the intended calibration purpose.** Constant-stagnation-pressure
+(Corberán) produces fundamentally different VE from constant-static-
+pressure (Phase E CSP) at engine-relevant Mach numbers. Measured:
+VE = 58% (Corberán at K≈0) vs 83% (CSP) at 10500 RPM SDM26. The
+25-point drop is the inherent difference between the two formulations,
+not a K-value effect — it accumulates as O(M²) per junction crossing
+compounded over ~10 wave transits × 3 junctions per cycle.
+
+Additionally, the K coefficient in the Corberán formulation acts as a
+stagnation-constraint relaxation (higher K → more mass throughput →
+higher VE), not as a wave-attenuation knob. This is the opposite of
+what the calibration required (reduce spurious tuning peaks).
+
+**Decision:** revert to Phase E CSP junction. Accept the inviscid
+91% per-junction transmission as a documented limitation. Proceed
+with F2/F3/F4 (Levine-Schwinger, restrictor Cd, Wiebe ramp) which
+address the other three identified sim-vs-dyno error sources.
+
+**Future work (Phase G):** a post-solve characteristic-space damping
+applied to the outgoing Riemann invariant at the junction face,
+with the HLLC flux recomputed against the modified ghost state and
+the Newton residual defined in terms of the post-damping HLLC flux
+for conservation consistency. Concept documented in the project
+planning notes. Estimated 100-150 lines when the math is worked out.
+
+**Original design document preserved below for reference.**
+
+---
+
+**Original status:** draft for review. No implementation code written. F1 attempts
 reverted to the Phase-E checkpoint.
 **Branch:** `phase-f/calibration` (off main @ `c3-complete`, containing the
 committed E2b + E4 + dense-sweep + PDF-report artifacts).
