@@ -35,33 +35,68 @@ class WiebeParams:
     duration_deg: float = 50.0         # V1 default for CBR600RR config
     spark_advance_deg: float = 25.0    # V1 default
     ignition_delay_deg: float = 7.0    # V1 default
-    eta_comb: float = 0.96             # combustion efficiency at high RPM (peak)
-    eta_comb_low: float = 0.55         # combustion efficiency at low RPM (floor)
-    eta_comb_ramp_lo: float = 3500.0   # RPM below which eta_comb = eta_comb_low
-    eta_comb_ramp_hi: float = 10500.0  # RPM above which eta_comb = eta_comb (peak)
+    eta_comb: float = 0.96             # base combustion efficiency (Wiebe model's
+                                       # theoretical maximum if everything were perfect)
     q_lhv: float = 44.0e6             # J/kg, gasoline
     afr_target: float = 13.1          # slightly rich for power
 
+    # V1 two-segment efficiency-factor ramp (Phase F4 corrected).
+    # V1 source: orchestrator.py:267-276, calibrated against SDM25
+    # DynoJet data May 2025.
+    #
+    # V1 uses: actual_eta_comb = base_efficiency × efficiency_factor(RPM)
+    # where base_efficiency = 0.96 (from CombustionConfig) and the factor
+    # acknowledges that the Wiebe model itself has deficiencies (wave speed
+    # error in V1's MOC, sin² cam profile approximation). The factor cap
+    # at 0.88 means peak actual eta_comb = 0.96 × 0.88 = 0.845.
+    #
+    # V2 inherits V1's factor ramp AND V1's base (0.96) per review
+    # decision (Option C). Caveat: V1's derating factor was calibrated
+    # for V1's specific model deficiencies, which differ from V2's
+    # (V2 has correct wave speed via HLLC-FV, better cam profiles, but
+    # has inviscid junction over-prediction and frozen gamma). The net
+    # effect of inheriting V1's factor is that V2 systematically
+    # under-predicts peak power by ~10-12% vs SDM25 dyno. This is
+    # honest and documented; future V2-specific calibration of the
+    # base_efficiency or the factor cap would address it.
+    _factor_rpm_lo: float = 3500.0     # below this: factor = 0.55
+    _factor_rpm_knee: float = 6000.0   # knee between steep and gentle segments
+    _factor_rpm_hi: float = 10500.0    # above this: factor = 0.88 (capped)
+    _factor_lo: float = 0.55           # factor at and below _factor_rpm_lo
+    _factor_knee: float = 0.80         # factor at _factor_rpm_knee
+    _factor_hi: float = 0.88           # factor at and above _factor_rpm_hi (cap)
+
     def eta_comb_at_rpm(self, rpm: float) -> float:
-        """RPM-dependent combustion efficiency (Phase F4).
+        """RPM-dependent combustion efficiency — V1's exact two-segment
+        factor ramp applied to the base eta_comb.
 
-        Linear ramp from ``eta_comb_low`` at ``eta_comb_ramp_lo`` RPM
-        to ``eta_comb`` at ``eta_comb_ramp_hi`` RPM. Captures real
-        combustion incompleteness at low RPM where the flame has more
-        time to quench against cylinder walls and mixture preparation
-        is poorer.
+        Two-segment piecewise linear on the efficiency_factor:
+          RPM ≤ 3500:          factor = 0.55  (poor low-RPM combustion)
+          3500 < RPM ≤ 6000:   linear 0.55 → 0.80  (steep improvement)
+          6000 < RPM ≤ 10500:  linear 0.80 → 0.88  (gentle plateau)
+          RPM > 10500:         factor = 0.88  (capped at design point)
 
-        Inherited from V1's calibration ramp (0.55 @ 3500 → 0.88 @ 10500+,
-        but V2 default peak eta = 0.96 per the Phase 1 audit).
+        actual_eta_comb = base_eta_comb × factor
 
+        Resulting values at key RPMs:
+          3500 RPM:  0.96 × 0.55 = 0.528
+          6000 RPM:  0.96 × 0.80 = 0.768
+          10500 RPM: 0.96 × 0.88 = 0.845
+
+        Source: V1 orchestrator.py:267-276, DynoJet calibration May 2025.
         Reference: Heywood 1988 §9 on combustion efficiency correlations.
         """
-        if rpm <= self.eta_comb_ramp_lo:
-            return self.eta_comb_low
-        if rpm >= self.eta_comb_ramp_hi:
-            return self.eta_comb
-        frac = (rpm - self.eta_comb_ramp_lo) / (self.eta_comb_ramp_hi - self.eta_comb_ramp_lo)
-        return self.eta_comb_low + frac * (self.eta_comb - self.eta_comb_low)
+        if rpm <= self._factor_rpm_lo:
+            factor = self._factor_lo
+        elif rpm <= self._factor_rpm_knee:
+            frac = (rpm - self._factor_rpm_lo) / (self._factor_rpm_knee - self._factor_rpm_lo)
+            factor = self._factor_lo + frac * (self._factor_knee - self._factor_lo)
+        elif rpm <= self._factor_rpm_hi:
+            frac = (rpm - self._factor_rpm_knee) / (self._factor_rpm_hi - self._factor_rpm_knee)
+            factor = self._factor_knee + frac * (self._factor_hi - self._factor_knee)
+        else:
+            factor = self._factor_hi
+        return self.eta_comb * factor
 
     @property
     def theta_start(self) -> float:

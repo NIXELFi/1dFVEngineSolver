@@ -219,8 +219,10 @@ def test_valve_Cd_scaling_affects_VE():
     """Scaling the intake Cd table down should reduce VE."""
     cfg_hi = SDM26Config()
     cfg_lo = SDM26Config(intake_cd_table=tuple(0.5 * c for c in SDM26Config().intake_cd_table))
-    r_hi = SDM26Engine(cfg_hi).run_single_rpm(10500, n_cycles=15, stop_at_convergence=True)
-    r_lo = SDM26Engine(cfg_lo).run_single_rpm(10500, n_cycles=15, stop_at_convergence=True)
+    r_hi = SDM26Engine(cfg_hi).run_single_rpm(10500, n_cycles=25, stop_at_convergence=True,
+                                              convergence_min_cycles=8)
+    r_lo = SDM26Engine(cfg_lo).run_single_rpm(10500, n_cycles=25, stop_at_convergence=True,
+                                              convergence_min_cycles=8)
     ve_hi = r_hi["cycle_stats"][-1]["ve_atm"]
     ve_lo = r_lo["cycle_stats"][-1]["ve_atm"]
     assert ve_lo < ve_hi, f"halving Cd did not reduce VE ({ve_hi:.3f} → {ve_lo:.3f})"
